@@ -1,60 +1,80 @@
 #include <iostream>
 #include <thread>
 #include <vector>
-#include <mutex>
 #include <chrono>
 #include <cmath>
 #include <algorithm>
+#include <numeric>
+#include <stdexcept>
 
-// Define the number of operations each thread will perform
-// Using a large number to ensure execution time is long enough to measure coherency overhead
-const long long NUM_ITERATIONS = 500000000; // 500 million operations
+// Total operations for the entire test
+const long long TOTAL_OPERATIONS = 500000000; // 500 million operations
+
+// =========================================================================
+// DATA STRUCTURES FOR N THREADS
+// =========================================================================
+
+// For GOOD Coherency: Each counter is padded to fit exactly one 64-byte cache line.
+// This prevents False Sharing, as each thread modifies its own line.
+struct AlignedCounter {
+    // The volatile keyword is used to prevent the compiler from caching the counter in a register,
+    // ensuring every update is a memory access (which then hits the L1 cache).
+    alignas(64) volatile long long count = 0; 
+};
+
+// For BAD Coherency: Counters are packed tightly (8 bytes each).
+// This maximizes the chance that multiple adjacent counters are on the same 64-byte cache line,
+// causing False Sharing and MOESI thrashing.
+struct UnalignedCounter {
+    volatile long long count = 0;
+};
+
+// =========================================================================
+// WORKER FUNCTION
+// =========================================================================
+
+// Generic function executed by every thread
+void worker_func(volatile long long& counter, long long iterations) {
+    for (long long i = 0; i < iterations; ++i) {
+        counter++;
+    }
+}
 
 // =========================================================================
 // SCENARIO 1: BAD COHERENCY (FALSE SHARING)
 // =========================================================================
 
-// Independent variables located close in memory, likely sharing a 64-byte cache line.
-struct FalseSharedData {
-    long long c1; // Accessed by Thread 1
-    long long c2; // Accessed by Thread 2
-    // Both c1 and c2 are in the same cache line, causing 'ping-pong' cache traffic.
-};
-
-FalseSharedData false_shared_data = {0, 0};
-
-void false_sharing_thread_1() {
-    for (long long i = 0; i < NUM_ITERATIONS; ++i) {
-        false_shared_data.c1++;
-    }
-}
-
-void false_sharing_thread_2() {
-    for (long long i = 0; i < NUM_ITERATIONS; ++i) {
-        false_shared_data.c2++;
-    }
-}
-
-double run_false_sharing_test() {
-    // Reset data for the test
-    false_shared_data = {0, 0};
+double run_false_sharing_test(int num_threads) {
+    if (num_threads <= 0) return 0.0;
     
+    // Allocate N counters contiguously
+    std::vector<UnalignedCounter> bad_data(num_threads);
+    long long iterations_per_thread = TOTAL_OPERATIONS / num_threads;
+
     auto start = std::chrono::high_resolution_clock::now();
+    std::vector<std::thread> threads;
 
-    std::thread t1(false_sharing_thread_1);
-    std::thread t2(false_sharing_thread_2);
+    // Launch N threads, each updating its own adjacent counter
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker_func, std::ref(bad_data[i].count), iterations_per_thread);
+    }
 
-    t1.join();
-    t2.join();
+    for (auto& t : threads) {
+        t.join();
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
 
+    long long total_increments = 0;
+    for (const auto& item : bad_data) {
+        total_increments += item.count;
+    }
+
     std::cout << "\n--- SCENARIO 1: BAD COHERENCY (FALSE SHARING) ---" << std::endl;
-    std::cout << "Description: Two threads update different variables on the same 64-byte cache line." << std::endl;
-    std::cout << "MOESI Thrashing: Causes frequent transitions between M, I, and O states, resulting in high interconnect traffic." << std::endl;
+    std::cout << "Description: " << num_threads << " threads update adjacent counters, causing MOESI cache line thrashing." << std::endl;
     std::cout << "Total time: " << duration.count() << " ms" << std::endl;
-    std::cout << "Total increments: " << false_shared_data.c1 + false_shared_data.c2 << std::endl;
+    std::cout << "Total increments: " << total_increments << std::endl;
 
     return duration.count();
 }
@@ -63,61 +83,62 @@ double run_false_sharing_test() {
 // SCENARIO 2: GOOD COHERENCY (AVOIDING FALSE SHARING)
 // =========================================================================
 
-// alignas(64) forces the subsequent variable to start on a new 64-byte boundary.
-// This is the standard cache line size on x86/AMD architectures.
-struct AlignedData {
-    alignas(64) long long c1; // Forced onto its own cache line
-    alignas(64) long long c2; // Forced onto its own cache line
-};
-
-AlignedData aligned_data = {0, 0};
-
-void good_coherency_thread_1() {
-    for (long long i = 0; i < NUM_ITERATIONS; ++i) {
-        aligned_data.c1++;
-    }
-}
-
-void good_coherency_thread_2() {
-    for (long long i = 0; i < NUM_ITERATIONS; ++i) {
-        aligned_data.c2++;
-    }
-}
-
-double run_good_coherency_test() {
-    // Reset data for the test
-    aligned_data = {0, 0};
+double run_good_coherency_test(int num_threads) {
+    if (num_threads <= 0) return 0.0;
     
+    // Allocate N aligned counters, guaranteeing no False Sharing
+    std::vector<AlignedCounter> good_data(num_threads);
+    long long iterations_per_thread = TOTAL_OPERATIONS / num_threads;
+
     auto start = std::chrono::high_resolution_clock::now();
+    std::vector<std::thread> threads;
 
-    std::thread t1(good_coherency_thread_1);
-    std::thread t2(good_coherency_thread_2);
+    // Launch N threads, each updating its own cache-aligned counter
+    for (int i = 0; i < num_threads; ++i) {
+        threads.emplace_back(worker_func, std::ref(good_data[i].count), iterations_per_thread);
+    }
 
-    t1.join();
-    t2.join();
+    for (auto& t : threads) {
+        t.join();
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
     std::chrono::duration<double, std::milli> duration = end - start;
 
+    long long total_increments = 0;
+    for (const auto& item : good_data) {
+        total_increments += item.count;
+    }
+
     std::cout << "\n--- SCENARIO 2: GOOD COHERENCY (ALIGNED DATA) ---" << std::endl;
-    std::cout << "Description: Two threads update different variables, each forced onto a separate 64-byte cache line." << std::endl;
-    std::cout << "MOESI Optimization: Each core holds its line in the Exclusive (E) or Modified (M) state without interference, minimizing bus traffic." << std::endl;
+    std::cout << "Description: " << num_threads << " threads update cache-aligned counters, minimizing MOESI traffic." << std::endl;
     std::cout << "Total time: " << duration.count() << " ms" << std::endl;
-    std::cout << "Total increments: " << aligned_data.c1 + aligned_data.c2 << std::endl;
+    std::cout << "Total increments: " << total_increments << std::endl;
 
     return duration.count();
 }
 
 // =========================================================================
-// MAIN FUNCTION AND RESULTS VISUALIZATION
+// MAIN FUNCTION (Handles User Input)
 // =========================================================================
 
 int main() {
-    std::cout << "Starting MOESI Cache Coherency Exploration on " << std::thread::hardware_concurrency() << " cores." << std::endl;
+    int num_threads;
+    int max_threads = static_cast<int>(std::thread::hardware_concurrency());
+
+    std::cout << "Detected hardware concurrency (max cores/threads): " << max_threads << std::endl;
+    std::cout << "Enter the number of threads (N) to use for the test: ";
     
+    if (!(std::cin >> num_threads) || num_threads <= 0) {
+        std::cerr << "Invalid input. Please enter a positive integer." << std::endl;
+        return 1;
+    }
+    
+    std::cout << "Running MOESI Cache Coherency Exploration with N = " << num_threads << " threads." << std::endl;
+
     // Run tests
-    double bad_time = run_false_sharing_test();
-    double good_time = run_good_coherency_test();
+    double bad_time = run_false_sharing_test(num_threads);
+    double good_time = run_good_coherency_test(num_threads);
 
     // Calculate and display comparison
     double speedup = bad_time / good_time;
@@ -126,14 +147,14 @@ int main() {
     std::cout << "\n=========================================================" << std::endl;
     std::cout << "                      COMPARISON                         " << std::endl;
     std::cout << "=========================================================" << std::endl;
+    std::cout << "Threads used: " << num_threads << std::endl;
     std::cout << "Time (False Sharing/Bad Coherency): " << bad_time << " ms" << std::endl;
     std::cout << "Time (Aligned Data/Good Coherency): " << good_time << " ms" << std::endl;
     std::cout << "SPEEDUP: The good coherency case is " << speedup << "x faster." << std::endl;
     std::cout << "The MOESI overhead reduced performance by " << performance_factor << " %." << std::endl;
     std::cout << "=========================================================" << std::endl;
     
-    // You would typically use a plotting library to generate the graphs based on these times
-    // For visualization, consider generating a bar chart comparing bad_time vs good_time.
+    // For visualization, you would generate a bar chart comparing bad_time vs good_time.
     
     return 0;
 }
