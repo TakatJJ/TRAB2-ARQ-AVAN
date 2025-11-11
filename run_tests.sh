@@ -12,7 +12,7 @@ SRC_GOOD=./src/good_coherency.cpp
 TARGET_BAD=./bin/bad.exe
 SRC_BAD=./src/bad_coherency.cpp
 PERF_PATH=perf
-RESULTS_DIR="./results/"
+RESULTS_DIR="./results/raw/"
 REPEATS=10
 METRICS_CACHE="cache-references,cache-misses,instructions"
 METRICS_ENERGY="power/energy-pkg/" # the energy consumed only by the current core running the process
@@ -54,17 +54,25 @@ printf "perf_event_paranoid set to -1.\n\n"
 
 for THREADS in "${NUM_THREADS[@]}"; do
     for NUM_EXECUTIONS in "${NUM_EXECUTIONS[@]}"; do
-        printf "Running tests with %d threads...\n" "$THREADS"
+        # Determine available modes
+        MODES=(0 2 3)
+        if [ "$THREADS" -eq 2 ]; then
+            MODES+=(1)
+        fi
 
-        printf "  Running bad coherency test...\n"
-        $PERF_PATH stat -e $METRICS_CACHE -r $REPEATS $TARGET_BAD $THREADS $NUM_EXECUTIONS > "${RESULTS_DIR}/bad_results_cache_${THREADS}_threads_${NUM_EXECUTIONS}_executions.txt" 2>&1
-        $PERF_PATH stat -e $METRICS_ENERGY -r $REPEATS $TARGET_BAD $THREADS $NUM_EXECUTIONS > "${RESULTS_DIR}/bad_results_energy_${THREADS}_threads_${NUM_EXECUTIONS}_executions.txt" 2>&1
+        for MODE in "${MODES[@]}"; do
+            printf "Running tests with %d threads, mode %d...\n" "$THREADS" "$MODE"
 
-        printf "  Running good coherency test...\n"
-        $PERF_PATH stat -e $METRICS_CACHE -r $REPEATS $TARGET_GOOD $THREADS $NUM_EXECUTIONS > "${RESULTS_DIR}/good_results_cache_${THREADS}_threads_${NUM_EXECUTIONS}_executions.txt" 2>&1
-        $PERF_PATH stat -e $METRICS_ENERGY -r $REPEATS $TARGET_GOOD $THREADS $NUM_EXECUTIONS > "${RESULTS_DIR}/good_results_energy_${THREADS}_threads_${NUM_EXECUTIONS}_executions.txt" 2>&1
+            printf "  Running bad coherency test...\n"
+            $PERF_PATH stat -e $METRICS_CACHE -r $REPEATS $TARGET_BAD $THREADS $NUM_EXECUTIONS $MODE > "${RESULTS_DIR}/bad_results_cache_${THREADS}_threads_${NUM_EXECUTIONS}_executions_mode${MODE}.txt" 2>&1
+            $PERF_PATH stat -e $METRICS_ENERGY -r $REPEATS $TARGET_BAD $THREADS $NUM_EXECUTIONS $MODE > "${RESULTS_DIR}/bad_results_energy_${THREADS}_threads_${NUM_EXECUTIONS}_executions_mode${MODE}.txt" 2>&1
 
-        printf "Completed tests with %d threads and %d executions.\n\n" "$THREADS" "$NUM_EXECUTIONS"
+            printf "  Running good coherency test...\n"
+            $PERF_PATH stat -e $METRICS_CACHE -r $REPEATS $TARGET_GOOD $THREADS $NUM_EXECUTIONS $MODE > "${RESULTS_DIR}/good_results_cache_${THREADS}_threads_${NUM_EXECUTIONS}_executions_mode${MODE}.txt" 2>&1
+            $PERF_PATH stat -e $METRICS_ENERGY -r $REPEATS $TARGET_GOOD $THREADS $NUM_EXECUTIONS $MODE > "${RESULTS_DIR}/good_results_energy_${THREADS}_threads_${NUM_EXECUTIONS}_executions_mode${MODE}.txt" 2>&1
+
+            printf "Completed tests with %d threads, mode %d and %d executions.\n\n" "$THREADS" "$MODE" "$NUM_EXECUTIONS"
+        done
     done
 done
 

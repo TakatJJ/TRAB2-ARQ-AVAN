@@ -2,12 +2,20 @@
 #include <thread>
 #include <vector>
 #include <chrono>
+#include <sched.h>
+
+std::vector<int> cpus;
 
 struct AlignedCounter {
     alignas(64) volatile long long count = 0;
 };
 
-void worker_func(volatile long long& counter, long long iterations) {
+void worker_func(int id, volatile long long& counter, long long iterations) {
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(cpus[id], &cpuset);
+    sched_setaffinity(0, sizeof(cpu_set_t), &cpuset);
+
     for (long long i = 0; i < iterations; ++i) {
         counter++;
     }
@@ -23,7 +31,7 @@ double run_good_coherency_test(int num_threads, long long total_operations) {
     std::vector<std::thread> threads;
 
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(worker_func, std::ref(good_data[i].count), iterations_per_thread);
+        threads.emplace_back(worker_func, i, std::ref(good_data[i].count), iterations_per_thread);
     }
 
     for (auto& t : threads) {
@@ -37,16 +45,52 @@ double run_good_coherency_test(int num_threads, long long total_operations) {
 }
 
 int main(int argc, char* argv[]) {
-    if (argc != 3) {
-        std::cerr << "Usage: " << argv[0] << " <num_threads> <total_operations>" << std::endl;
+    if (argc < 3 || argc > 4) {
+        std::cerr << "Usage: " << argv[0] << " <num_threads> <total_operations> [mode]" << std::endl;
+        std::cerr << "Modes: 0=default, 1=same core (2 threads only), 2=same CCD different cores, 3=different CCDs" << std::endl;
         return 1;
     }
 
     int num_threads = std::stoi(argv[1]);
     long long total_operations = std::stoll(argv[2]);
+    int mode = (argc == 4) ? std::stoi(argv[3]) : 0;
+
+    // Define core mappings based on lscpu -e (L3 cache sharing)
+    std::vector<int> ccd0_cores = {0, 1, 2, 3, 4, 5};
+    std::vector<int> ccd1_cores = {6, 7, 8, 9, 10, 11};
+
+    // Set CPUs based on mode
+    cpus.clear();
+    if (mode == 0) {
+        // Default: no specific affinity, use 0 to num_threads-1
+        for (int i = 0; i < num_threads; ++i) cpus.push_back(i);
+    } else if (mode == 1) {
+        if (num_threads != 2) {
+            std::cerr << "Mode 1 only supported for 2 threads" << std::endl;
+            return 1;
+        }
+        cpus = {0, 12}; // Same core (core 0)
+    } else if (mode == 2) {
+        // Different cores in same CCD (CCD1)
+        for (int i = 0; i < num_threads; ++i) {
+            cpus.push_back(ccd1_cores[i % ccd1_cores.size()]);
+        }
+    } else if (mode == 3) {
+        // Different CCDs
+        for (int i = 0; i < num_threads; ++i) {
+            if (i % 2 == 0) {
+                cpus.push_back(ccd1_cores[(i / 2) % ccd1_cores.size()]);
+            } else {
+                cpus.push_back(ccd0_cores[(i / 2) % ccd0_cores.size()]);
+            }
+        }
+    } else {
+        std::cerr << "Invalid mode" << std::endl;
+        return 1;
+    }
 
     double time = run_good_coherency_test(num_threads, total_operations);
-    std::cout << "Time for good coherency: " << time << " ms" << std::endl;
+    std::cout << "Time for good coherency (mode " << mode << "): " << time << " ms" << std::endl;
 
     return 0;
 }

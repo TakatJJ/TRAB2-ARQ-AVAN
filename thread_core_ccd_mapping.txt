@@ -1,0 +1,41 @@
+CCD 0:
+  Core 0:
+    Thread 0
+    Thread 12
+  Core 1:
+    Thread 1
+    Thread 13
+  Core 2:
+    Thread 2
+    Thread 14
+  Core 3:
+    Thread 3
+    Thread 15
+  Core 4:
+    Thread 4
+    Thread 16
+  Core 5:
+    Thread 5
+    Thread 17
+
+CCD 1:
+  Core 6:
+    Thread 6
+    Thread 18
+  Core 7:
+    Thread 7
+    Thread 19
+  Core 8:
+    Thread 8
+    Thread 20
+  Core 9:
+    Thread 9
+    Thread 21
+  Core 10:
+    Thread 10
+    Thread 22
+  Core 11:
+    Thread 11
+    Thread 23
+
+
