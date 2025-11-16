@@ -55,9 +55,9 @@ int main(int argc, char* argv[]) {
     long long total_operations = std::stoll(argv[2]);
     int mode = (argc == 4) ? std::stoi(argv[3]) : 0;
 
-    // Define core mappings based on lscpu -e (L3 cache sharing)
-    std::vector<int> ccd0_cores = {0, 1, 2, 3, 4, 5};
-    std::vector<int> ccd1_cores = {6, 7, 8, 9, 10, 11};
+    // Define CPU mappings based on /sys topology (L3 cache sharing)
+    std::vector<int> ccd0_cores = {0,1,2,3,4,5,12,13,14,15,16,17};
+    std::vector<int> ccd1_cores = {6,7,8,9,10,11,18,19,20,21,22,23};
 
     // Set CPUs based on mode
     cpus.clear();
@@ -69,7 +69,7 @@ int main(int argc, char* argv[]) {
             std::cerr << "Mode 1 only supported for 2 threads" << std::endl;
             return 1;
         }
-        cpus = {0, 12}; // Same core (core 0)
+        cpus = {9, 21}; // Same core (core 9)
     } else if (mode == 2) {
         // Different cores in same CCD (CCD1)
         for (int i = 0; i < num_threads; ++i) {

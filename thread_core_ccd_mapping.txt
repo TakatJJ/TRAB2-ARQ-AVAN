@@ -19,22 +19,22 @@ CCD 0:
     Thread 17
 
 CCD 1:
-  Core 6:
+  Core 8:
     Thread 6
     Thread 18
-  Core 7:
+  Core 9:
     Thread 7
     Thread 19
-  Core 8:
+  Core 10:
     Thread 8
     Thread 20
-  Core 9:
+  Core 11:
     Thread 9
     Thread 21
-  Core 10:
+  Core 12:
     Thread 10
     Thread 22
-  Core 11:
+  Core 13:
     Thread 11
     Thread 23
 
