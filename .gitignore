@@ -1,4 +1,6 @@
 __pycache__/
 .vscode/
-results/
+results/raw/
+results/tmp2/
 bin/
+papi/
