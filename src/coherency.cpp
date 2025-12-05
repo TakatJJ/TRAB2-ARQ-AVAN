@@ -4,12 +4,57 @@
 #include <chrono>
 #include <sched.h>
 #include <string>
+#include <cstdlib>
+#include <new>
 
 std::vector<int> cpus;
 
-struct AlignedCounter {
+static constexpr std::size_t cache_line_size = 64;
+
+#ifdef ALIGNED_COUNTER
+struct Counter {
     alignas(64) volatile long long count = 0;
 };
+#else
+struct Counter {
+    volatile long long count = 0;
+};
+#endif
+
+template <typename T>
+struct AlignedAllocator {
+    using value_type = T;
+
+    AlignedAllocator() = default;
+
+    template <class U>
+    constexpr AlignedAllocator(const AlignedAllocator<U>&) noexcept {}
+
+    T* allocate(std::size_t n) {
+        if (n > std::size_t(-1) / sizeof(T)) throw std::bad_alloc();
+
+        // Calculate size: must be a multiple of alignment (64)
+        std::size_t alignment = cache_line_size;
+        std::size_t bytes = n * sizeof(T);
+        std::size_t aligned_size = (bytes + alignment - 1) & ~(alignment - 1);
+
+        void* ptr = std::aligned_alloc(alignment, aligned_size);
+        if (!ptr) throw std::bad_alloc();
+
+        return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* p, std::size_t) noexcept {
+        std::free(p);
+    }
+};
+
+template <class T, class U>
+bool operator==(const AlignedAllocator<T>&, const AlignedAllocator<U>&) { return true; }
+
+template <class T, class U>
+bool operator!=(const AlignedAllocator<T>&, const AlignedAllocator<U>&) { return false; }
+
 
 // Fast Linear Congruential Generator for low-overhead randomness
 inline unsigned int fast_rand(unsigned int& state) {
@@ -30,6 +75,11 @@ void worker_func(int id, volatile long long& counter, long long iterations, bool
         if (stress_uarch) {
             // Case 2: Bad uArch (Random Branching)
             // Memory is fast (L1), but Branch Predictor fails ~50% of the time
+            // & Case 4: Bad Memory & Bad uArch
+            // The branch depends on 'counter' (which is False Shared/Slow).
+            // The CPU speculates, but can't know if it's right until 'counter' arrives.
+            // When it arrives, we force a misprediction (randomness).
+            // Result: Pipeline stalls waiting for memory + Wasted speculative work.
             if (fast_rand(seed) & 1) {
                 counter++;
             } else {
@@ -37,22 +87,23 @@ void worker_func(int id, volatile long long& counter, long long iterations, bool
             }
         } else {
             // Case 1: Good Everything (Predictable)
+            // & Case 3: Bad Memory Only (Predictable Branch)
             counter++;
         }
     }
 }
 
-double run_good_coherency_test(int num_threads, long long total_operations, bool stress_uarch) {
+double run_test(int num_threads, long long total_operations, bool stress_uarch) {
     if (num_threads <= 0) return 0.0;
-    
-    std::vector<AlignedCounter> good_data(num_threads);
+
+    std::vector<Counter, AlignedAllocator<Counter>> counters(num_threads);
     long long iterations_per_thread = total_operations / num_threads;
 
     auto start = std::chrono::high_resolution_clock::now();
     std::vector<std::thread> threads;
 
     for (int i = 0; i < num_threads; ++i) {
-        threads.emplace_back(worker_func, i, std::ref(good_data[i].count), iterations_per_thread, stress_uarch);
+        threads.emplace_back(worker_func, i, std::ref(counters[i].count), iterations_per_thread, stress_uarch);
     }
 
     for (auto& t : threads) {
@@ -80,7 +131,7 @@ int main(int argc, char* argv[]) {
     bool stress_uarch = (argc == 5) ? (std::stoi(argv[4]) != 0) : false;
 
     // Define CPU mappings based on /sys topology
-    std::vector<int> ccd0_cores = {0,1,2,3,4,5,12,13,14,15,16,17};
+    std::vector<int> ccd0_cores = {1,2,3,4,5,13,14,15,16,17};
     std::vector<int> ccd1_cores = {6,7,8,9,10,11,18,19,20,21,22,23};
 
     cpus.clear();
@@ -100,8 +151,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    double time = run_good_coherency_test(num_threads, total_operations, stress_uarch);
-    std::cout << "Time for good coherency (mode " << mode << ", stress " << stress_uarch << "): " << time << " ms" << std::endl;
+    double time = run_test(num_threads, total_operations, stress_uarch);
+    #ifdef ALIGNED_COUNTER
+        std::cout << "Time for good coherency (mode " << mode << ", stress " << stress_uarch << "): " << time << " ms" << std::endl;
+    #else
+        std::cout << "Time for bad coherency (mode " << mode << ", stress " << stress_uarch << "): " << time << " ms" << std::endl;
+    #endif
 
     return 0;
 }
