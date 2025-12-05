@@ -5,905 +5,436 @@ import matplotlib.pyplot as plt
 from collections import defaultdict
 
 # Path to the raw results folder
-results_dir = 'results/raw'
+results_dir = "results/raw"
 
-# Color palette - pastel green and red tones
-GOOD_COLOR = '#21674f' 
-BAD_COLOR = '#CC6666'  
-
-# Color gradients for time_vs_executions graphs
-GOOD_COLORS = ['#21674f', '#3f907a', '#75b9a0', '#b7dbbf']  # Light to medium green pastels
-BAD_COLORS = ['#CC6666', '#D17A7A', '#D98F8F', '#E3A3A3']   # Light to medium red/pink pastels
+# --- NEW COLOR PALETTE (4 Cases) ---
+# Case 1: Good Everything (Green)
+C1_COLOR = "#21674f"
+# Case 2: Bad uArch (Blue - distinct from Green/Red)
+C2_COLOR = "#4a90e2"
+# Case 3: Bad Memory (Red - existing bad color)
+C3_COLOR = "#CC6666"
+# Case 4: Bad Both (Purple - showing the combination intensity)
+C4_COLOR = "#8e44ad"
 
 # Metrics to plot
-metrics = ['time', 'energy', 'remote_cache_fills',
-           'l1_accesses', 'l1_miss_rate',
-           'l2_accesses', 'l2_miss_rate',
-           'l3_accesses', 'l3_miss_rate']
+metrics = [
+    "time",
+    "energy",
+    "branch_misses",
+    "remote_cache_fills",
+    "l1_accesses",
+    "l1_miss_rate",
+    "l2_accesses",
+    "l2_miss_rate",
+    "l3_accesses",
+    "l3_miss_rate",
+]
 
 # Mode names mapping
-mode_names = {
-    0: 'Default',
-    1: 'Same core',
-    2: 'Same CCD',
-    3: 'Different CCDs'
-}
+mode_names = {0: "Default", 1: "Same core", 2: "Same CCD", 3: "Different CCDs"}
 
 # Units for each metric
 metric_units = {
-    'time': 'seconds',
-    'energy': 'joules',
-    'remote_cache_fills': 'fills',
-    'l1_accesses': 'accesses',
-    'l1_miss_rate': '%',
-    'l2_accesses': 'accesses',
-    'l2_miss_rate': '%',
-    'l3_accesses': 'accesses',
-    'l3_miss_rate': '%'
+    "time": "seconds",
+    "energy": "joules",
+    "branch_misses": "misses",
+    "remote_cache_fills": "fills",
+    "l1_accesses": "accesses",
+    "l1_miss_rate": "%",
+    "l2_accesses": "accesses",
+    "l2_miss_rate": "%",
+    "l3_accesses": "accesses",
+    "l3_miss_rate": "%",
 }
 
-# Metric titles (custom names for display)
+# Metric titles
 metric_titles = {
-    'time': 'Time',
-    'energy': 'Energy',
-    'remote_cache_fills': 'Demand/Remote Cache Fills',
-    'l1_accesses': 'L1 Cache Accesses',
-    'l1_miss_rate': 'L1 Cache Miss Rate',
-    'l2_accesses': 'L2 Cache Accesses',
-    'l2_miss_rate': 'L2 Cache Miss Rate',
-    'l3_accesses': 'L3 Cache Accesses',
-    'l3_miss_rate': 'L3 Cache Miss Rate'
+    "time": "Time",
+    "energy": "Energy",
+    "branch_misses": "Branch Misses",
+    "remote_cache_fills": "Demand/Remote Cache Fills",
+    "l1_accesses": "L1 Cache Accesses",
+    "l1_miss_rate": "L1 Cache Miss Rate",
+    "l2_accesses": "L2 Cache Accesses",
+    "l2_miss_rate": "L2 Cache Miss Rate",
+    "l3_accesses": "L3 Cache Accesses",
+    "l3_miss_rate": "L3 Cache Miss Rate",
 }
 
-# Function to parse a file based on metric
+
 def parse_file(filepath, metric):
-    with open(filepath, 'r') as f:
-        lines = f.readlines()
-    if metric in ['time', 'energy']:
-        # Each line is a float
-        return [float(line.strip()) for line in lines if line.strip()]
-    elif metric == 'perf_cache':
-        # Skip header, each line has 4 comma-separated values: remote_fills,demand_remote_fills,conflicts,cache_misses
-        data = []
-        for line in lines[1:]:  # Skip header
-            if line.strip():
-                values = [int(x.strip()) if x.strip() != 'NaN' else 0 for x in line.split(',')]
-                data.append(values)
-        return data
-    elif metric == 'perf_l1':
-        # Skip header, each line has 2 comma-separated values: l1_fills,l1_l2_hits
-        data = []
-        for line in lines[1:]:  # Skip header
-            if line.strip():
-                values = [int(x.strip()) if x.strip() != 'NaN' else 0 for x in line.split(',')]
-                data.append(values)
-        return data
-    elif metric == 'perf_l2':
-        # Skip header, each line has 3 comma-separated values: l2_all,l2_hits,l2_misses
-        data = []
-        for line in lines[1:]:  # Skip header
-            if line.strip():
-                values = [int(x.strip()) if x.strip() != 'NaN' else 0 for x in line.split(',')]
-                data.append(values)
-        return data
-    elif metric == 'perf_l3':
-        # Skip header, each line has 2 comma-separated values: l3_accesses,l3_misses
-        data = []
-        for line in lines[1:]:  # Skip header
-            if line.strip():
-                values = [int(x.strip()) if x.strip() != 'NaN' else 0 for x in line.split(',')]
-                data.append(values)
-        return data
-    return []
+    try:
+        with open(filepath, "r") as f:
+            lines = f.readlines()
 
-# Collect all data
-data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list))))
+        # Simple float metrics
+        if metric in ["time", "energy", "branch_misses"]:
+            return [
+                float(line.strip())
+                for line in lines
+                if line.strip() and line.strip() != "NaN"
+            ]
 
-# Get all txt files
-files = glob.glob(os.path.join(results_dir, '*.txt'))
+        # CSV style metrics
+        data = []
+
+        start_idx = 0
+        if len(lines) > 0:
+            # Try converting the first item of the first line to a float.
+            # If it fails (ValueError), it's a header, so we start at index 1.
+            try:
+                first_item = lines[0].split(",")[0].strip()
+                if not first_item or first_item == "NaN":
+                    # If it's empty or NaN, we assume it's data (or bad data),
+                    # but usually headers are distinct text like 'l2_cache...'
+                    pass
+                else:
+                    float(first_item)
+            except ValueError:
+                start_idx = 1
+
+        for line in lines[start_idx:]:
+            if line.strip():
+                # Handle potential NaN
+                values = []
+                for x in line.split(","):
+                    x = x.strip()
+                    if x == "NaN" or not x:
+                        values.append(0)
+                    else:
+                        values.append(float(x))  # Use float for safety
+                data.append(values)
+        return data
+    except Exception as e:
+        print(f"Error parsing {filepath}: {e}")
+        return []
+
+
+# --- 1. DATA COLLECTION ---
+# Structure: data[thread][mode][stress][goodbad][metric]
+data = defaultdict(
+    lambda: defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    )
+)
+
+files = glob.glob(os.path.join(results_dir, "*.txt"))
 
 for file in files:
     filename = os.path.basename(file)
-    parts = filename.split('_')
-    if len(parts) < 5:
+    parts = filename.split("_")
+
+    # We need at least: metric_threads_size_mode_stress_goodbad.txt
+    if len(parts) < 6:
         continue
-    
-    # Handle perf_* files
-    if parts[0] == 'perf' and len(parts) > 1:
-        if parts[1] == 'cache':
-            metric = 'perf_cache'
-            thread_idx = 2
-        elif parts[1] == 'l1':
-            metric = 'perf_l1'
-            thread_idx = 2
-        elif parts[1] == 'l2':
-            metric = 'perf_l2'
-            thread_idx = 2
-        elif parts[1] == 'l3':
-            metric = 'perf_l3'
-            thread_idx = 2
-        else:
+
+    # Identify Metric and Index Offset
+    # Format 1: metric_... (e.g., time_2_...)
+    # Format 2: perf_metric_... (e.g., perf_l1_2_...)
+
+    if parts[0] == "perf":
+        if len(parts) < 2:
             continue
+        metric_type = f"perf_{parts[1]}"  # perf_cache, perf_l1, etc.
+        thread_idx = 2
     else:
-        metric = parts[0]
+        metric_type = parts[0]
         thread_idx = 1
-    
-    if metric not in ['time', 'energy', 'perf_cache', 'perf_l1', 'perf_l2', 'perf_l3']:
+
+    # Check if thread_idx points to a number (validating offset)
+    if not parts[thread_idx].isdigit():
         continue
-    
+
     thread = int(parts[thread_idx])
     size = int(parts[thread_idx + 1])
-    mode = int(parts[thread_idx + 2][4:])  # modeX -> X
-    goodbad = parts[thread_idx + 3].split('.')[0]  # good or bad
-    
-    parsed = parse_file(file, metric)
-    if metric == 'perf_cache':
-        # For each run, extract the perf cache metrics
-        for run in parsed:
-            remote_fills, demand_remote_fills, conflicts, cache_misses = run
-            # Use demand_remote_fills as the main remote cache fills metric
-            data[thread][mode][goodbad]['remote_cache_fills'].append(demand_remote_fills)
-            data[thread][mode][goodbad]['_cache_misses_raw'].append(cache_misses)
-            data[thread][mode][goodbad]['_cache_references_raw'].append(cache_misses)  # Will be updated with actual references
-    elif metric == 'perf_l1':
-        # For each run, extract L1 metrics
-        for run in parsed:
-            l1_fills, l1_l2_hits = run
-            data[thread][mode][goodbad]['l1_fills'].append(l1_fills)
-            data[thread][mode][goodbad]['l1_l2_hits'].append(l1_l2_hits)
-    elif metric == 'perf_l2':
-        # For each run, extract L2 metrics
-        for run in parsed:
-            l2_requests, l2_hits, l2_misses = run
-            data[thread][mode][goodbad]['l2_requests'].append(l2_requests)
-            data[thread][mode][goodbad]['l2_hits'].append(l2_hits)
-            data[thread][mode][goodbad]['l2_misses'].append(l2_misses)
-    elif metric == 'perf_l3':
-        # For each run, extract L3 metrics
-        for run in parsed:
-            l3_accesses, l3_misses = run
-            data[thread][mode][goodbad]['l3_accesses'].append(l3_accesses)
-            data[thread][mode][goodbad]['l3_misses'].append(l3_misses)
+    mode_str = parts[thread_idx + 2]  # mode0
+    stress_str = parts[thread_idx + 3]  # stress0
+    goodbad_file = parts[thread_idx + 4]  # good.txt or bad.txt
+
+    mode = int(mode_str[4:])
+
+    # Parse Stress (New Parameter)
+    if "stress" in stress_str:
+        stress = int(stress_str[6:])
     else:
-        data[thread][mode][goodbad][metric].extend(parsed)
+        # Fallback for old files if mixed
+        stress = 0
+        goodbad_file = stress_str  # Shift if stress missing
 
-# Calculate cache access counts and miss rates for L1, L2, L3
-for thread in data:
-    for mode in data[thread]:
-        for goodbad in data[thread][mode]:
-            # L1: accesses = l1_fills (all L1 misses are accesses to L2)
-            # L1 miss rate = (l1_fills - l1_l2_hits) / l1_fills * 100
-            if 'l1_fills' in data[thread][mode][goodbad]:
-                l1_fills = data[thread][mode][goodbad]['l1_fills']
-                l1_l2_hits = data[thread][mode][goodbad].get('l1_l2_hits', [0] * len(l1_fills))
-                
-                data[thread][mode][goodbad]['l1_accesses'] = l1_fills
-                
-                l1_miss_rates = []
-                for i in range(len(l1_fills)):
-                    if l1_fills[i] > 0:
-                        # L1 misses that didn't hit in L2 = l1_fills - l1_l2_hits
-                        l1_misses = l1_fills[i] - l1_l2_hits[i]
-                        miss_rate = (l1_misses / l1_fills[i]) * 100
-                        l1_miss_rates.append(miss_rate)
-                    else:
-                        l1_miss_rates.append(0)
-                data[thread][mode][goodbad]['l1_miss_rate'] = l1_miss_rates
-            
-            # L2: accesses = l2_requests, miss rate = l2_misses / l2_requests * 100
-            if 'l2_requests' in data[thread][mode][goodbad] and 'l2_misses' in data[thread][mode][goodbad]:
-                l2_reqs = data[thread][mode][goodbad]['l2_requests']
-                l2_misses = data[thread][mode][goodbad]['l2_misses']
-                
-                data[thread][mode][goodbad]['l2_accesses'] = l2_reqs
-                
-                l2_miss_rates = []
-                for i in range(len(l2_reqs)):
-                    if l2_reqs[i] > 0:
-                        miss_rate = (l2_misses[i] / l2_reqs[i]) * 100
-                        l2_miss_rates.append(miss_rate)
-                    else:
-                        l2_miss_rates.append(0)
-                data[thread][mode][goodbad]['l2_miss_rate'] = l2_miss_rates
-            
-            # L3: accesses = l3_accesses, miss rate = l3_misses / l3_accesses * 100
-            if 'l3_accesses' in data[thread][mode][goodbad] and 'l3_misses' in data[thread][mode][goodbad]:
-                l3_accs = data[thread][mode][goodbad]['l3_accesses']
-                l3_misses = data[thread][mode][goodbad]['l3_misses']
-                
-                l3_miss_rates = []
-                for i in range(len(l3_accs)):
-                    if l3_accs[i] > 0:
-                        miss_rate = (l3_misses[i] / l3_accs[i]) * 100
-                        l3_miss_rates.append(miss_rate)
-                    else:
-                        l3_miss_rates.append(0)
-                data[thread][mode][goodbad]['l3_miss_rate'] = l3_miss_rates
+    goodbad = goodbad_file.split(".")[0]
 
-# Now, for each thread, compute means and stds
-for thread in range(1, 11):
-    if thread not in data:
-        continue
-    
-    # Get all modes for this thread
+    parsed = parse_file(file, metric_type)
+
+    # Store raw data
+    target_dict = data[thread][mode][stress][goodbad]
+
+    if metric_type == "perf_cache":
+        for run in parsed:
+            if len(run) >= 4:
+                target_dict["remote_cache_fills"].append(run[1])  # demand_remote
+    elif metric_type == "perf_l1":
+        for run in parsed:
+            if len(run) >= 2:
+                target_dict["l1_fills"].append(run[0])
+                target_dict["l1_l2_hits"].append(run[1])
+    elif metric_type == "perf_l2":
+        for run in parsed:
+            if len(run) >= 3:
+                target_dict["l2_requests"].append(run[0])
+                target_dict["l2_hits"].append(run[1])
+                target_dict["l2_misses"].append(run[2])
+    elif metric_type == "perf_l3":
+        for run in parsed:
+            if len(run) >= 2:
+                target_dict["l3_accesses"].append(run[0])
+                target_dict["l3_misses"].append(run[1])
+    elif metric_type == "perf_uarch":
+        # If you saved branch misses in a separate file (from my previous fix)
+        target_dict["branch_misses"].extend(parsed)
+    elif metric_type in ["time", "energy"]:
+        target_dict[metric_type].extend(parsed)
+
+# --- 2. CALCULATE DERIVED METRICS ---
+for t in data:
+    for m in data[t]:
+        for s in data[t][m]:
+            for gb in data[t][m][s]:
+                d = data[t][m][s][gb]
+
+                # L1 Miss Rate
+                if "l1_fills" in d:
+                    d["l1_accesses"] = d["l1_fills"]
+                    rates = []
+                    for i in range(len(d["l1_fills"])):
+                        if i < len(d["l1_l2_hits"]) and d["l1_fills"][i] > 0:
+                            misses = d["l1_fills"][i] - d["l1_l2_hits"][i]
+                            rates.append((misses / d["l1_fills"][i]) * 100)
+                        else:
+                            rates.append(0)
+                    d["l1_miss_rate"] = rates
+
+                # L2 Miss Rate
+                if "l2_requests" in d:
+                    d["l2_accesses"] = d["l2_requests"]
+                    rates = []
+                    for i in range(len(d["l2_requests"])):
+                        if i < len(d["l2_misses"]) and d["l2_requests"][i] > 0:
+                            rates.append(
+                                (d["l2_misses"][i] / d["l2_requests"][i]) * 100
+                            )
+                        else:
+                            rates.append(0)
+                    d["l2_miss_rate"] = rates
+
+                # L3 Miss Rate
+                if "l3_accesses" in d:
+                    rates = []
+                    for i in range(len(d["l3_accesses"])):
+                        if i < len(d["l3_misses"]) and d["l3_accesses"][i] > 0:
+                            rates.append(
+                                (d["l3_misses"][i] / d["l3_accesses"][i]) * 100
+                            )
+                        else:
+                            rates.append(0)
+                    d["l3_miss_rate"] = rates
+
+
+# --- 3. HELPER TO GET STATISTICS ---
+def get_stats(thread, mode, stress, goodbad, metric):
+    # Determine the "Case" based on stress/goodbad
+    # Case 1: Good Mem (good.cpp) + No Stress (0)
+    # Case 2: Good Mem (good.cpp) + Stress (1)
+    # Case 3: Bad Mem (bad.cpp) + No Stress (0)
+    # Case 4: Bad Mem (bad.cpp) + Stress (1)
+
+    vals = data[thread][mode][stress][goodbad].get(metric, [])
+    if not vals:
+        return 0, 0
+    return np.mean(vals), np.std(vals, ddof=1) / np.sqrt(len(vals)) if len(
+        vals
+    ) > 1 else 0
+
+
+# --- 4. PLOTTING: METRIC vs MODE (4 Bars per Mode) ---
+for thread in sorted(data.keys()):
     modes = sorted(data[thread].keys())
-    
-    # Prepare figure - now we have 9 metrics
-    # Using 3 rows x 3 columns = 9 subplots (perfect fit)
-    fig, axes = plt.subplots(3, 3, figsize=(18, 15))
+
+    # 3x4 grid for metrics
+    fig, axes = plt.subplots(3, 4, figsize=(22, 14))  # Slightly larger
     axes = axes.flatten()
-    
+
     for i, metric in enumerate(metrics):
+        if i >= len(axes):
+            break
         ax = axes[i]
-        
-        good_means = []
-        good_stds = []
-        bad_means = []
-        bad_stds = []
-        
+
+        # Prepare data for 4 bars per mode
+        case1_means, case1_errs = [], []  # Good All
+        case2_means, case2_errs = [], []  # Bad uArch
+        case3_means, case3_errs = [], []  # Bad Mem
+        case4_means, case4_errs = [], []  # Bad Both
+
         for mode in modes:
-            if 'good' in data[thread][mode] and metric in data[thread][mode]['good']:
-                good_values = data[thread][mode]['good'][metric]
-                if len(good_values) > 1:
-                    good_means.append(np.mean(good_values))
-                    # Use standard error of the mean instead of standard deviation
-                    good_stds.append(np.std(good_values, ddof=1) / np.sqrt(len(good_values)))
-                else:
-                    good_means.append(np.mean(good_values) if good_values else 0)
-                    good_stds.append(0)
-            else:
-                good_means.append(0)
-                good_stds.append(0)
-            
-            if 'bad' in data[thread][mode] and metric in data[thread][mode]['bad']:
-                bad_values = data[thread][mode]['bad'][metric]
-                if len(bad_values) > 1:
-                    bad_means.append(np.mean(bad_values))
-                    # Use standard error of the mean instead of standard deviation
-                    bad_stds.append(np.std(bad_values, ddof=1) / np.sqrt(len(bad_values)))
-                else:
-                    bad_means.append(np.mean(bad_values) if bad_values else 0)
-                    bad_stds.append(0)
-            else:
-                bad_means.append(0)
-                bad_stds.append(0)
-        
+            # Case 1: Good + Stress 0
+            m, e = get_stats(thread, mode, 0, "good", metric)
+            case1_means.append(m)
+            case1_errs.append(e)
+
+            # Case 2: Good + Stress 1
+            m, e = get_stats(thread, mode, 1, "good", metric)
+            case2_means.append(m)
+            case2_errs.append(e)
+
+            # Case 3: Bad + Stress 0
+            m, e = get_stats(thread, mode, 0, "bad", metric)
+            case3_means.append(m)
+            case3_errs.append(e)
+
+            # Case 4: Bad + Stress 1
+            m, e = get_stats(thread, mode, 1, "bad", metric)
+            case4_means.append(m)
+            case4_errs.append(e)
+
         x = np.arange(len(modes))
-        width = 0.35
-        
-        bars1 = ax.bar(x - width/2, good_means, width, label='Good', color=GOOD_COLOR, yerr=good_stds, capsize=5)
-        bars2 = ax.bar(x + width/2, bad_means, width, label='Bad', color=BAD_COLOR, yerr=bad_stds, capsize=5)
-        
-        # Add value labels on top of bars
-        for bar, value in zip(bars1, good_means):
-            if value > 0:
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + bar.get_y(), 
-                       f'{value:.2f}', ha='center', va='bottom', fontsize=8)
-        
-        for bar, value in zip(bars2, bad_means):
-            if value > 0:
-                ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + bar.get_y(), 
-                       f'{value:.2f}', ha='center', va='bottom', fontsize=8)
-        
-        # Calculate ratios for each mode and create labels
-        mode_labels = []
-        ratios = []
-        for idx, mode in enumerate(modes):
-            mode_label = mode_names.get(mode, f'Mode {mode}')
-            if good_means[idx] > 0:
-                ratio = bad_means[idx] / good_means[idx]
-                ratios.append(ratio)
-                mode_labels.append(f'{mode_label}\n({ratio:.2f}x)')
-            else:
-                mode_labels.append(mode_label)
-        
+        width = 0.2
+
+        # Plot 4 bars
+        ax.bar(
+            x - 1.5 * width,
+            case1_means,
+            width,
+            label="Good All",
+            color=C1_COLOR,
+            yerr=case1_errs,
+            capsize=3,
+        )
+        ax.bar(
+            x - 0.5 * width,
+            case2_means,
+            width,
+            label="Bad uArch",
+            color=C2_COLOR,
+            yerr=case2_errs,
+            capsize=3,
+        )
+        ax.bar(
+            x + 0.5 * width,
+            case3_means,
+            width,
+            label="Bad Mem",
+            color=C3_COLOR,
+            yerr=case3_errs,
+            capsize=3,
+        )
+        ax.bar(
+            x + 1.5 * width,
+            case4_means,
+            width,
+            label="Bad Both",
+            color=C4_COLOR,
+            yerr=case4_errs,
+            capsize=3,
+        )
+
         ax.set_xticks(x)
-        ax.set_xticklabels(mode_labels, fontsize=9)
-        
-        # Calculate global ratio (worst vs best)
-        all_values = good_means + bad_means
-        valid_values = [v for v in all_values if v > 0]
-        global_ratio_text = ""
-        if valid_values:
-            max_val = max(valid_values)
-            min_val = min(valid_values)
-            if min_val > 0:
-                global_ratio = max_val / min_val
-                global_ratio_text = f'\nGlobal Ratio (Max/Min): {global_ratio:.2f}x'
-        
-        # Use custom title if available, otherwise format the metric name
-        title = metric_titles.get(metric, metric.replace("_", " ").title())
-        ax.set_title(f'{title} ({metric_units[metric]}){global_ratio_text}', fontsize=10)
-        ax.legend(loc='best')
+        ax.set_xticklabels([mode_names.get(m, f"Mode {m}") for m in modes])
+        ax.set_title(metric_titles.get(metric, metric))
+
+        if i == 0:  # Legend only on first plot to save space
+            ax.legend(loc="upper left", fontsize="small")
+
         ax.grid(True, alpha=0.3)
-    
-    plt.suptitle(f'Results for {thread} Thread(s)', fontsize=16, fontweight='bold')
+
+    plt.suptitle(f"Results for {thread} Thread(s)", fontsize=16)
     plt.tight_layout()
-    # High resolution for cropping individual subplots without pixelation
-    plt.savefig(f'results/plots/plot_thread_{thread}.png', dpi=600, bbox_inches='tight')
+    plt.savefig(f"results/plots/plot_thread_{thread}.png", dpi=300)
     plt.close()
 
-# ============================================================================
-# Additional Plot 1: Time vs Number of Threads (Mode 0, largest execution count)
-# ============================================================================
+# --- 5. PLOTTING: TIME vs THREADS (4 Lines) ---
+# We generally look at Mode 0 (Default) or Mode 3 (Worst layout)
+# Let's generate one for every mode found
 
-# Find the largest execution count available
-all_sizes = set()
-for thread in data:
-    for mode in data[thread]:
-        for goodbad in data[thread][mode]:
-            # Get the size from the file names (we need to track this)
-            pass
-
-# We need to get sizes from the files again
-sizes_per_thread_mode = defaultdict(lambda: defaultdict(set))
-for file in files:
-    filename = os.path.basename(file)
-    parts = filename.split('_')
-    if len(parts) < 5:
-        continue
-    
-    if parts[0] == 'time':
-        thread = int(parts[1])
-        size = int(parts[2])
-        mode = int(parts[3][4:])
-        sizes_per_thread_mode[thread][mode].add(size)
-
-# Find the largest common size for mode 0
-largest_size = 0
-for thread in range(1, 11):
-    if thread in sizes_per_thread_mode and 0 in sizes_per_thread_mode[thread]:
-        sizes = sizes_per_thread_mode[thread][0]
-        if sizes:
-            largest_size = max(largest_size, max(sizes))
-
-# Collect time data for mode 0 with largest size
-thread_time_data = defaultdict(lambda: {'good': [], 'bad': []})
-for file in files:
-    filename = os.path.basename(file)
-    parts = filename.split('_')
-    if len(parts) < 5 or parts[0] != 'time':
-        continue
-    
-    thread = int(parts[1])
-    size = int(parts[2])
-    mode = int(parts[3][4:])
-    goodbad = parts[4].split('.')[0]
-    
-    if mode == 0 and size == largest_size:
-        parsed = parse_file(file, 'time')
-        thread_time_data[thread][goodbad].extend(parsed)
-
-# Plot time vs threads
-if thread_time_data:
-    threads = sorted(thread_time_data.keys())
-    good_means = []
-    good_stds = []
-    bad_means = []
-    bad_stds = []
-    ratios = []
-    
-    for t in threads:
-        if 'good' in thread_time_data[t] and thread_time_data[t]['good']:
-            good_vals = thread_time_data[t]['good']
-            good_means.append(np.mean(good_vals))
-            good_stds.append(np.std(good_vals, ddof=1) / np.sqrt(len(good_vals)))
-        else:
-            good_means.append(0)
-            good_stds.append(0)
-        
-        if 'bad' in thread_time_data[t] and thread_time_data[t]['bad']:
-            bad_vals = thread_time_data[t]['bad']
-            bad_means.append(np.mean(bad_vals))
-            bad_stds.append(np.std(bad_vals, ddof=1) / np.sqrt(len(bad_vals)))
-        else:
-            bad_means.append(0)
-            bad_stds.append(0)
-        
-        # Calculate ratio
-        if good_means[-1] > 0:
-            ratios.append(bad_means[-1] / good_means[-1])
-        else:
-            ratios.append(0)
-    
-    fig, ax = plt.subplots(figsize=(12, 8))
-    
-    x = np.array(threads)
-    ax.errorbar(x, good_means, yerr=good_stds, label='Good', color=GOOD_COLOR, 
-                marker='o', markersize=8, linewidth=2, capsize=5)
-    ax.errorbar(x, bad_means, yerr=bad_stds, label='Bad', color=BAD_COLOR, 
-                marker='s', markersize=8, linewidth=2, capsize=5)
-    
-    # Add ratio labels for each point
-    for i, (t, ratio) in enumerate(zip(threads, ratios)):
-        if ratio > 0:
-            # Position the ratio label above the bad (red) line
-            y_pos = max(bad_means[i], good_means[i]) * 1.05
-            ax.text(t, y_pos, f'{ratio:.2f}x', ha='center', va='bottom', 
-                   fontsize=9, fontweight='bold', color='#CC6666')
-    
-    ax.set_xlabel('Number of Threads', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Execution Time (seconds)', fontsize=12, fontweight='bold')
-    mode_name = mode_names.get(0, 'Mode 0')
-    ax.set_title(f'Execution Time vs Number of Threads\n({mode_name}, {largest_size} executions)', 
-                fontsize=14, fontweight='bold')
-    ax.set_xticks(threads)
-    ax.legend(fontsize=11)
-    ax.grid(True, alpha=0.3)
-    
-    plt.tight_layout()
-    plt.savefig(f'results/plots/time_vs_threads_mode0.png', dpi=300, bbox_inches='tight')
-    plt.close()
-
-# ============================================================================
-# Additional Plot 2: Time vs Number of Executions (Mode 0, varying threads)
-# ============================================================================
-
-# Collect time data organized by size
-size_time_data = defaultdict(lambda: defaultdict(lambda: {'good': [], 'bad': []}))
-available_sizes = set()
-
-for file in files:
-    filename = os.path.basename(file)
-    parts = filename.split('_')
-    if len(parts) < 5 or parts[0] != 'time':
-        continue
-    
-    thread = int(parts[1])
-    size = int(parts[2])
-    mode = int(parts[3][4:])
-    goodbad = parts[4].split('.')[0]
-    
-    if mode == 0:  # Only mode 0
-        parsed = parse_file(file, 'time')
-        size_time_data[size][thread][goodbad].extend(parsed)
-        available_sizes.add(size)
-
-# Plot time vs executions for different thread counts (combined good and bad)
-if size_time_data and available_sizes:
-    sizes = sorted(available_sizes)
-    
-    # Select a few thread counts to display (2, 3, 5, 7)
-    selected_threads = [t for t in [2, 3, 5, 7] if any(t in size_time_data[s] for s in sizes)]
-    
-    # Use the pastel color gradients defined at the top
-    markers = ['o', 's', '^', 'd']
-    
-    fig, ax = plt.subplots(figsize=(14, 8))
-    
-    # Plot both Good and Bad on the same graph
-    for idx, t in enumerate(selected_threads):
-        # Good implementation
-        good_means = []
-        good_stds = []
-        for s in sizes:
-            if t in size_time_data[s] and 'good' in size_time_data[s][t]:
-                vals = size_time_data[s][t]['good']
-                if vals:
-                    good_means.append(np.mean(vals))
-                    good_stds.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                else:
-                    good_means.append(0)
-                    good_stds.append(0)
-            else:
-                good_means.append(0)
-                good_stds.append(0)
-        
-        if good_means:
-            ax.errorbar(sizes, good_means, yerr=good_stds, label=f'{t} threads (Good)', 
-                       color=GOOD_COLORS[idx % len(GOOD_COLORS)], 
-                       marker=markers[idx % len(markers)],
-                       markersize=8, linewidth=2, capsize=5, linestyle='-')
-        
-        # Bad implementation
-        bad_means = []
-        bad_stds = []
-        for s in sizes:
-            if t in size_time_data[s] and 'bad' in size_time_data[s][t]:
-                vals = size_time_data[s][t]['bad']
-                if vals:
-                    bad_means.append(np.mean(vals))
-                    bad_stds.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                else:
-                    bad_means.append(0)
-                    bad_stds.append(0)
-            else:
-                bad_means.append(0)
-                bad_stds.append(0)
-        
-        if bad_means:
-            ax.errorbar(sizes, bad_means, yerr=bad_stds, label=f'{t} threads (Bad)', 
-                       color=BAD_COLORS[idx % len(BAD_COLORS)], 
-                       marker=markers[idx % len(markers)],
-                       markersize=8, linewidth=2, capsize=5, linestyle='--')
-    
-    ax.set_xlabel('Number of Executions', fontsize=12, fontweight='bold')
-    ax.set_ylabel('Execution Time (seconds)', fontsize=12, fontweight='bold')
-    mode_name = mode_names.get(0, 'Mode 0')
-    ax.set_title(f'Execution Time vs Number of Executions\n({mode_name})', 
-                fontsize=14, fontweight='bold')
-    ax.legend(fontsize=9, ncol=2)
-    ax.grid(True, alpha=0.3)
-    ax.ticklabel_format(style='scientific', axis='x', scilimits=(0,0))
-    
-    plt.tight_layout()
-    plt.savefig('results/plots/time_vs_executions_mode0.png', dpi=300, bbox_inches='tight')
-    plt.close()
-
-# ============================================================================
-# Generate Time vs Threads and Time vs Executions for ALL modes (except mode 1)
-# ============================================================================
-
-# Get all available modes
 all_modes = set()
-for thread in sizes_per_thread_mode:
-    all_modes.update(sizes_per_thread_mode[thread].keys())
-all_modes = sorted(all_modes)
+for t in data:
+    all_modes.update(data[t].keys())
 
-# For each mode, generate both graphs (skip mode 1)
-for current_mode in all_modes:
-    if current_mode == 1:  # Skip mode 1 (Same core)
-        continue
-    mode_name = mode_names.get(current_mode, f'Mode {current_mode}')
-    
-    # Find the largest common size for this mode
-    largest_size_mode = 0
-    for thread in range(1, 11):
-        if thread in sizes_per_thread_mode and current_mode in sizes_per_thread_mode[thread]:
-            sizes = sizes_per_thread_mode[thread][current_mode]
-            if sizes:
-                largest_size_mode = max(largest_size_mode, max(sizes))
-    
-    if largest_size_mode == 0:
-        continue
-    
-    # ========================================================================
-    # Time vs Threads for this mode
-    # ========================================================================
-    thread_time_data_mode = defaultdict(lambda: {'good': [], 'bad': []})
-    for file in files:
-        filename = os.path.basename(file)
-        parts = filename.split('_')
-        if len(parts) < 5 or parts[0] != 'time':
+for target_mode in sorted(all_modes):
+    if target_mode == 1:
+        continue  # Skip same core usually
+
+    threads = sorted(data.keys())
+    c1, c2, c3, c4 = [], [], [], []
+    e1, e2, e3, e4 = [], [], [], []
+    valid_threads = []
+
+    for t in threads:
+        # Check if we have data for this mode
+        if target_mode not in data[t]:
             continue
-        
-        thread = int(parts[1])
-        size = int(parts[2])
-        mode = int(parts[3][4:])
-        goodbad = parts[4].split('.')[0]
-        
-        if mode == current_mode and size == largest_size_mode:
-            parsed = parse_file(file, 'time')
-            thread_time_data_mode[thread][goodbad].extend(parsed)
-    
-    if thread_time_data_mode:
-        threads = sorted(thread_time_data_mode.keys())
-        good_means = []
-        good_stds = []
-        bad_means = []
-        bad_stds = []
-        ratios = []
-        
-        for t in threads:
-            if 'good' in thread_time_data_mode[t] and thread_time_data_mode[t]['good']:
-                good_vals = thread_time_data_mode[t]['good']
-                good_means.append(np.mean(good_vals))
-                good_stds.append(np.std(good_vals, ddof=1) / np.sqrt(len(good_vals)))
-            else:
-                good_means.append(0)
-                good_stds.append(0)
-            
-            if 'bad' in thread_time_data_mode[t] and thread_time_data_mode[t]['bad']:
-                bad_vals = thread_time_data_mode[t]['bad']
-                bad_means.append(np.mean(bad_vals))
-                bad_stds.append(np.std(bad_vals, ddof=1) / np.sqrt(len(bad_vals)))
-            else:
-                bad_means.append(0)
-                bad_stds.append(0)
-            
-            # Calculate ratio
-            if good_means[-1] > 0:
-                ratios.append(bad_means[-1] / good_means[-1])
-            else:
-                ratios.append(0)
-        
-        fig, ax = plt.subplots(figsize=(12, 8))
-        
-        x = np.array(threads)
-        ax.errorbar(x, good_means, yerr=good_stds, label='Good', color=GOOD_COLOR, 
-                    marker='o', markersize=8, linewidth=2, capsize=5)
-        ax.errorbar(x, bad_means, yerr=bad_stds, label='Bad', color=BAD_COLOR, 
-                    marker='s', markersize=8, linewidth=2, capsize=5)
-        
-        # Add ratio labels for each point
-        for i, (t, ratio) in enumerate(zip(threads, ratios)):
-            if ratio > 0:
-                y_pos = max(bad_means[i], good_means[i]) * 1.05
-                ax.text(t, y_pos, f'{ratio:.2f}x', ha='center', va='bottom', 
-                       fontsize=9, fontweight='bold', color='#CC6666')
-        
-        ax.set_xlabel('Number of Threads', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Execution Time (seconds)', fontsize=12, fontweight='bold')
-        ax.set_title(f'Execution Time vs Number of Threads\n({mode_name}, {largest_size_mode} executions)', 
-                    fontsize=14, fontweight='bold')
-        ax.set_xticks(threads)
-        ax.legend(fontsize=11)
-        ax.grid(True, alpha=0.3)
-        
-        plt.tight_layout()
-        plt.savefig(f'results/plots/time_vs_threads_mode{current_mode}.png', dpi=300, bbox_inches='tight')
-        plt.close()
-    
-    # ========================================================================
-    # Time vs Executions for this mode
-    # ========================================================================
-    size_time_data_mode = defaultdict(lambda: defaultdict(lambda: {'good': [], 'bad': []}))
-    available_sizes_mode = set()
-    
-    for file in files:
-        filename = os.path.basename(file)
-        parts = filename.split('_')
-        if len(parts) < 5 or parts[0] != 'time':
-            continue
-        
-        thread = int(parts[1])
-        size = int(parts[2])
-        mode = int(parts[3][4:])
-        goodbad = parts[4].split('.')[0]
-        
-        if mode == current_mode:
-            parsed = parse_file(file, 'time')
-            size_time_data_mode[size][thread][goodbad].extend(parsed)
-            available_sizes_mode.add(size)
-    
-    if size_time_data_mode and available_sizes_mode:
-        sizes = sorted(available_sizes_mode)
-        selected_threads = [t for t in [2, 3, 5, 7] if any(t in size_time_data_mode[s] for s in sizes)]
-        
-        markers = ['o', 's', '^', 'd']
-        
-        fig, ax = plt.subplots(figsize=(14, 8))
-        
-        for idx, t in enumerate(selected_threads):
-            # Good implementation
-            good_means = []
-            good_stds = []
-            for s in sizes:
-                if t in size_time_data_mode[s] and 'good' in size_time_data_mode[s][t]:
-                    vals = size_time_data_mode[s][t]['good']
-                    if vals:
-                        good_means.append(np.mean(vals))
-                        good_stds.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                    else:
-                        good_means.append(0)
-                        good_stds.append(0)
-                else:
-                    good_means.append(0)
-                    good_stds.append(0)
-            
-            if good_means:
-                ax.errorbar(sizes, good_means, yerr=good_stds, label=f'{t} threads (Good)', 
-                           color=GOOD_COLORS[idx % len(GOOD_COLORS)], 
-                           marker=markers[idx % len(markers)],
-                           markersize=8, linewidth=2, capsize=5, linestyle='-')
-            
-            # Bad implementation
-            bad_means = []
-            bad_stds = []
-            for s in sizes:
-                if t in size_time_data_mode[s] and 'bad' in size_time_data_mode[s][t]:
-                    vals = size_time_data_mode[s][t]['bad']
-                    if vals:
-                        bad_means.append(np.mean(vals))
-                        bad_stds.append(np.std(vals, ddof=1) / np.sqrt(len(vals)))
-                    else:
-                        bad_means.append(0)
-                        bad_stds.append(0)
-                else:
-                    bad_means.append(0)
-                    bad_stds.append(0)
-            
-            if bad_means:
-                ax.errorbar(sizes, bad_means, yerr=bad_stds, label=f'{t} threads (Bad)', 
-                           color=BAD_COLORS[idx % len(BAD_COLORS)], 
-                           marker=markers[idx % len(markers)],
-                           markersize=8, linewidth=2, capsize=5, linestyle='--')
-        
-        ax.set_xlabel('Number of Executions', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Execution Time (seconds)', fontsize=12, fontweight='bold')
-        ax.set_title(f'Execution Time vs Number of Executions\n({mode_name})', 
-                    fontsize=14, fontweight='bold')
-        ax.legend(fontsize=9, ncol=2)
-        ax.grid(True, alpha=0.3)
-        ax.ticklabel_format(style='scientific', axis='x', scilimits=(0,0))
-        
-        plt.tight_layout()
-        plt.savefig(f'results/plots/time_vs_executions_mode{current_mode}.png', dpi=300, bbox_inches='tight')
-        plt.close()
 
-# ============================================================================
-# Additional Plot: Time vs Mode Comparison
-# ============================================================================
+        valid_threads.append(t)
 
-# Collect time data for each mode (using largest execution count, various threads)
-mode_comparison_data = defaultdict(lambda: defaultdict(lambda: {'good': [], 'bad': []}))
+        m, e = get_stats(t, target_mode, 0, "good", "time")
+        c1.append(m)
+        e1.append(e)
 
-# Find the largest common size across all modes
-largest_common_size = 0
-for thread in range(1, 11):
-    if thread in sizes_per_thread_mode:
-        common_sizes = None
-        for mode in sizes_per_thread_mode[thread]:
-            if common_sizes is None:
-                common_sizes = sizes_per_thread_mode[thread][mode].copy()
-            else:
-                common_sizes = common_sizes.intersection(sizes_per_thread_mode[thread][mode])
-        if common_sizes:
-            largest_common_size = max(largest_common_size, max(common_sizes))
+        m, e = get_stats(t, target_mode, 1, "good", "time")
+        c2.append(m)
+        e2.append(e)
 
-# Collect data for mode comparison
-for file in files:
-    filename = os.path.basename(file)
-    parts = filename.split('_')
-    if len(parts) < 5 or parts[0] != 'time':
+        m, e = get_stats(t, target_mode, 0, "bad", "time")
+        c3.append(m)
+        e3.append(e)
+
+        m, e = get_stats(t, target_mode, 1, "bad", "time")
+        c4.append(m)
+        e4.append(e)
+
+    if not valid_threads:
         continue
-    
-    thread = int(parts[1])
-    size = int(parts[2])
-    mode = int(parts[3][4:])
-    goodbad = parts[4].split('.')[0]
-    
-    if size == largest_common_size:
-        parsed = parse_file(file, 'time')
-        mode_comparison_data[mode][thread][goodbad].extend(parsed)
 
-# Create comparison plots for ALL thread counts
-if mode_comparison_data:
-    # Get all available thread counts (1-10)
-    all_thread_counts = [t for t in range(1, 11) 
-                        if any(t in mode_comparison_data[m] for m in mode_comparison_data)]
-    
-    if all_thread_counts:
-        # Create a figure with subplots for each thread count (2 rows x 5 columns for 10 threads)
-        n_threads = len(all_thread_counts)
-        fig, axes = plt.subplots(2, 5, figsize=(24, 10))
-        axes = axes.flatten()
-        
-        # Collect all values to determine global y-axis scale
-        all_good_values = []
-        all_bad_values = []
-        
-        for thread_count in all_thread_counts:
-            modes_with_data = sorted([m for m in mode_comparison_data 
-                                     if thread_count in mode_comparison_data[m]])
-            for mode in modes_with_data:
-                if 'good' in mode_comparison_data[mode][thread_count]:
-                    good_vals = mode_comparison_data[mode][thread_count]['good']
-                    if good_vals:
-                        all_good_values.append(np.mean(good_vals))
-                
-                if 'bad' in mode_comparison_data[mode][thread_count]:
-                    bad_vals = mode_comparison_data[mode][thread_count]['bad']
-                    if bad_vals:
-                        all_bad_values.append(np.mean(bad_vals))
-        
-        # Determine global y-axis limits
-        if all_good_values or all_bad_values:
-            all_values = all_good_values + all_bad_values
-            y_max = max(all_values) * 1.15  # Add 15% padding at top
-            y_min = 0
-        else:
-            y_max = 1
-            y_min = 0
-        
-        for idx, thread_count in enumerate(all_thread_counts):
-            ax = axes[idx]
-            
-            # Get all modes that have data for this thread count
-            modes_with_data = sorted([m for m in mode_comparison_data 
-                                     if thread_count in mode_comparison_data[m]])
-            
-            if not modes_with_data:
-                continue
-            
-            good_means = []
-            good_stds = []
-            bad_means = []
-            bad_stds = []
-            mode_labels = []
-            ratios = []
-            
-            for mode in modes_with_data:
-                mode_labels.append(mode_names.get(mode, f'Mode {mode}'))
-                
-                if 'good' in mode_comparison_data[mode][thread_count]:
-                    good_vals = mode_comparison_data[mode][thread_count]['good']
-                    if good_vals:
-                        good_means.append(np.mean(good_vals))
-                        good_stds.append(np.std(good_vals, ddof=1) / np.sqrt(len(good_vals)))
-                    else:
-                        good_means.append(0)
-                        good_stds.append(0)
-                else:
-                    good_means.append(0)
-                    good_stds.append(0)
-                
-                if 'bad' in mode_comparison_data[mode][thread_count]:
-                    bad_vals = mode_comparison_data[mode][thread_count]['bad']
-                    if bad_vals:
-                        bad_means.append(np.mean(bad_vals))
-                        bad_stds.append(np.std(bad_vals, ddof=1) / np.sqrt(len(bad_vals)))
-                    else:
-                        bad_means.append(0)
-                        bad_stds.append(0)
-                else:
-                    bad_means.append(0)
-                    bad_stds.append(0)
-                
-                # Calculate ratio
-                if good_means[-1] > 0:
-                    ratios.append(bad_means[-1] / good_means[-1])
-                else:
-                    ratios.append(0)
-            
-            x = np.arange(len(modes_with_data))
-            width = 0.35
-            
-            bars1 = ax.bar(x - width/2, good_means, width, label='Good', color=GOOD_COLOR, 
-                          yerr=good_stds, capsize=5)
-            bars2 = ax.bar(x + width/2, bad_means, width, label='Bad', color=BAD_COLOR, 
-                          yerr=bad_stds, capsize=5)
-            
-            # Add value labels on top of bars
-            for bar, value in zip(bars1, good_means):
-                if value > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), 
-                           f'{value:.2f}', ha='center', va='bottom', fontsize=8)
-            
-            for bar, value in zip(bars2, bad_means):
-                if value > 0:
-                    ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), 
-                           f'{value:.2f}', ha='center', va='bottom', fontsize=8)
-            
-            # Add ratio labels below mode names
-            mode_labels_with_ratio = []
-            for i, (label, ratio) in enumerate(zip(mode_labels, ratios)):
-                if ratio > 0:
-                    mode_labels_with_ratio.append(f'{label}\n({ratio:.2f}x)')
-                else:
-                    mode_labels_with_ratio.append(label)
-            
-            ax.set_xticks(x)
-            ax.set_xticklabels(mode_labels_with_ratio, fontsize=8)
-            ax.set_ylabel('Time (s)', fontsize=9, fontweight='bold')
-            ax.set_title(f'{thread_count} Thread(s)', fontsize=10, fontweight='bold')
-            ax.legend(fontsize=8)
-            ax.grid(True, alpha=0.3, axis='y')
-            
-            # Set the same y-axis scale for all subplots
-            ax.set_ylim(y_min, y_max)
-        
-        # Hide unused subplots if less than 10 thread counts
-        for j in range(len(all_thread_counts), len(axes)):
-            axes[j].set_visible(False)
-        
-        # Calculate global ratio (best/worst across all modes and threads)
-        all_values_global = all_good_values + all_bad_values
-        if all_values_global:
-            best_value = min(all_values_global)
-            worst_value = max(all_values_global)
-            if best_value > 0:
-                global_ratio = worst_value / best_value
-                title_text = f'Execution Time Comparison Across Modes\n({largest_common_size} executions)\nGlobal Ratio (Worst/Best): {global_ratio:.2f}x'
-            else:
-                title_text = f'Execution Time Comparison Across Modes\n({largest_common_size} executions)'
-        else:
-            title_text = f'Execution Time Comparison Across Modes\n({largest_common_size} executions)'
-        
-        plt.suptitle(title_text, fontsize=16, fontweight='bold')
-        plt.tight_layout()
-        # High resolution for cropping individual subplots without pixelation
-        plt.savefig('results/plots/time_vs_modes.png', dpi=600, bbox_inches='tight')
-        plt.close()
+    plt.figure(figsize=(10, 6))
 
-print("Plots generated successfully!")
+    plt.errorbar(
+        valid_threads,
+        c1,
+        yerr=e1,
+        fmt="o-",
+        label="Good All",
+        color=C1_COLOR,
+        capsize=5,
+    )
+    plt.errorbar(
+        valid_threads,
+        c2,
+        yerr=e2,
+        fmt="s-",
+        label="Bad uArch",
+        color=C2_COLOR,
+        capsize=5,
+    )
+    plt.errorbar(
+        valid_threads, c3, yerr=e3, fmt="^-", label="Bad Mem", color=C3_COLOR, capsize=5
+    )
+    plt.errorbar(
+        valid_threads,
+        c4,
+        yerr=e4,
+        fmt="d-",
+        label="Bad Both",
+        color=C4_COLOR,
+        capsize=5,
+    )
+
+    plt.xlabel("Number of Threads")
+    plt.ylabel("Time (s)")
+    plt.title(f"Execution Time vs Threads ({mode_names.get(target_mode, target_mode)})")
+    plt.legend()
+    plt.grid(True, alpha=0.3)
+    plt.xticks(valid_threads)
+
+    plt.savefig(f"results/plots/time_vs_threads_mode{target_mode}.png", dpi=300)
+    plt.close()
+
+print("Plots generated successfully with 4-case Analysis!")
