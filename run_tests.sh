@@ -28,9 +28,10 @@ METRICS_BRANCH="branch-misses,ex_ret_brn_misp,bp_redirects.ex_redir,bp_de_redire
 METRICS_SPECULATION="de_src_op_disp.all,ex_ret_ops,de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall"
 METRICS_PIPELINE="ex_no_retire.empty,ex_no_retire.load_not_complete,bp_redirects.resync,de_no_dispatch_per_slot.backend_stalls"
 METRICS_ROB="de_dispatch_stall_cycle_dynamic_tokens_part2.retq"
+METRICS_COHERENCE="ls_alloc_mab_count,l2_request_g1.rd_blk_x,l2_fill_rsp_src.local_ccx,l2_fill_rsp_src.far_cache"
 
 # Concatenate uArch metrics
-METRICS_UARCH="$METRICS_BRANCH,$METRICS_SPECULATION,$METRICS_PIPELINE,$METRICS_ROB"
+METRICS_UARCH="$METRICS_BRANCH,$METRICS_SPECULATION,$METRICS_PIPELINE,$METRICS_ROB,$METRICS_COHERENCE"
 
 # 4. BIG COMBINED METRIC STRING (Non-Energy)
 # We join all non-energy metrics to run perf only once for these.
@@ -69,7 +70,7 @@ printf "\n"
 
 # --- EXECUTION PARAMETERS ---
 NUM_THREADS=(1 2 3 4 5 6 7 8 9 10)
-NUM_EXECUTIONS=(1000000000)
+NUM_EXECUTIONS=(10000000)
 TARGET_GOOD="./bin/good.exe"
 TARGET_BAD="./bin/bad.exe"
 
@@ -146,7 +147,7 @@ for THREADS in "${NUM_THREADS[@]}"; do
                     echo "ls_dmnd_fills_from_sys.all,ls_dmnd_fills_from_sys.local_l2" > "$perf_l1_file"
                     echo "l2_cache_req_stat.all,l2_cache_req_stat.ic_dc_hit_in_l2,l2_cache_req_stat.ic_dc_miss_in_l2" > "$perf_l2_file"
                     echo "ls_dmnd_fills_from_sys.local_ccx,ls_dmnd_fills_from_sys.dram_io_all" > "$perf_l3_file"
-                    echo "branch_misses,ex_ret_brn_misp,bp_redir_ex,bp_de_redir,bp_l2_btb,bp_l1_tlb,disp_all,ret_ops,ld_q_stall,no_ret_empty,no_ret_ld,resync,backend_stall,rob_stall" > "$perf_uarch_file"
+                    echo "branch_misses,ex_ret_brn_misp,bp_redir_ex,bp_de_redir,bp_l2_btb,bp_l1_tlb,disp_all,ret_ops,ld_q_stall,no_ret_empty,no_ret_ld,resync,backend_stall,rob_stall,instructions,mab_alloc,l2_rfo,local_fill,remote_fill" > "$perf_uarch_file"
 
                     # Execution Loop
                     for ((r=1; r<=RUNS; r++)); do
@@ -212,10 +213,18 @@ for THREADS in "${NUM_THREADS[@]}"; do
                             /bp_redirects\.resync/ {gsub(",", "", $1); resync=$1}
                             /de_no_dispatch_per_slot\.backend_stalls/ {gsub(",", "", $1); backend_stall=$1}
                             /de_dispatch_stall_cycle_dynamic_tokens_part2\.retq/ {gsub(",", "", $1); rob_stall=$1}
+                            
+                            # --- NEW PARSING ---
+                            /instructions/ {gsub(",", "", $1); instr=$1}
+                            /ls_alloc_mab_count/ {gsub(",", "", $1); mab=$1}
+                            /l2_request_g1\.rd_blk_x/ {gsub(",", "", $1); l2_rfo=$1}
+                            /l2_fill_rsp_src\.local_ccx/ {gsub(",", "", $1); local_fill=$1}
+                            /l2_fill_rsp_src\.far_cache/ {gsub(",", "", $1); remote_fill=$1}
+
                             END {
-                                print br_miss "," ex_br_misp "," bp_redir_ex "," bp_de_redir "," bp_l2_btb "," bp_l1_tlb "," disp_all "," ret_ops "," ld_q_stall "," no_ret_empty "," no_ret_ld "," resync "," backend_stall "," rob_stall
+                                print br_miss "," ex_br_misp "," bp_redir_ex "," bp_de_redir "," bp_l2_btb "," bp_l1_tlb "," disp_all "," ret_ops "," ld_q_stall "," no_ret_empty "," no_ret_ld "," resync "," backend_stall "," rob_stall "," instr "," mab "," l2_rfo "," local_fill "," remote_fill
                             }
-                        ' || echo "NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN"; } >> "$perf_uarch_file"
+                        ' || echo "NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN"; } >> "$perf_uarch_file"
                     done # End RUNS
                 done # End TEST_TYPE (Bad/Good)
 

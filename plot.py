@@ -54,6 +54,11 @@ metrics = [
     "no_ret_ld",  # Waiting for Load (Backend Bound)
     "backend_stall",  # General Backend Stalls
     "rob_stall",  # ROB Full
+    "instructions",  # Total Instructions
+    "mab_alloc",  # MAB Congestion
+    "l2_rfo",  # L2 Writes (Read For Ownership)
+    "local_fill",  # Same-CCD Traffic
+    "remote_fill",  # Cross-CCD Traffic
 ]
 
 log_metrics = [
@@ -95,11 +100,11 @@ metric_units = {
     "no_ret_ld": "cycles",
     "backend_stall": "cycles",
     "rob_stall": "cycles",
-    # Coherence Units
-    "l3_latency": "cycles",
-    "l2_write_reqs": "reqs",
-    "mab_alloc": "cycle-occupancy",
-    "local_bw": "events/bytes",
+    "instructions": "ops",
+    "mab_alloc": "cycles",
+    "l2_rfo": "reqs",
+    "local_fill": "fills",
+    "remote_fill": "fills",
 }
 
 # Metric titles
@@ -128,10 +133,11 @@ metric_titles = {
     "no_ret_ld": "No Retire (Waiting for Load)",
     "backend_stall": "Backend Stalls",
     "rob_stall": "ROB Full Stalls",
-    "l3_latency": "L3 Read Miss Latency",
-    "l2_write_reqs": "L2 Write Reqs (RFO)",
+    "instructions": "Total Instructions",
     "mab_alloc": "MAB Congestion",
-    "local_bw": "Outbound Fabric BW",
+    "l2_rfo": "L2 Write Reqs (RFO)",
+    "local_fill": "Local CCX Fills",
+    "remote_fill": "Remote CCX Fills",
 }
 
 
@@ -265,11 +271,12 @@ for file in files:
                 target_dict["rob_stall"].append(run[13])
 
             # New Coherence Metrics (Check if they exist)
-            if len(run) >= 18:
-                target_dict["l3_latency"].append(run[14])
-                target_dict["l2_write_reqs"].append(run[15])
-                target_dict["mab_alloc"].append(run[16])
-                target_dict["local_bw"].append(run[17])
+            if len(run) >= 19:
+                target_dict["instructions"].append(run[14])
+                target_dict["mab_alloc"].append(run[15])
+                target_dict["l2_rfo"].append(run[16])
+                target_dict["local_fill"].append(run[17])
+                target_dict["remote_fill"].append(run[18])
 
     elif metric_type in ["time", "energy"]:
         target_dict[metric_type].extend(parsed)
