@@ -7,6 +7,7 @@
 #     "pyqt6",
 # ]
 # ///
+
 import os
 import glob
 import numpy as np
@@ -24,131 +25,55 @@ C3_COLOR = "#CC6666"  # Bad Mem
 C4_COLOR = "#8e44ad"  # Bad Both
 
 # --- METRIC DEFINITIONS ---
-# Must match headers in results_*.csv (from headers.csv) + derived metrics
-metrics = [
-    # General
-    "time",
-    "energy",
-    "instructions",
-    "cycles",
-    # Memory Hierarchy
-    "ls_any_fills_from_sys.remote_cache",
-    "ls_dmnd_fills_from_sys.remote_cache",
-    "cache-misses",
-    "ls_bad_status2.stli_other",
-    # L1
-    "ls_dmnd_fills_from_sys.all",
-    "l1_miss_rate",  # Derived
-    # L2
-    "l2_cache_req_stat.all",
-    "l2_miss_rate",  # Derived
-    # L3
-    "ls_dmnd_fills_from_sys.local_ccx",
-    "ls_dmnd_fills_from_sys.dram_io_all",
-    # Coherence (Zig-Zag Investigation)
-    "l2_request_g1.rd_blk_x",  # Writes/RFO
-    "ls_alloc_mab_count",  # MAB Congestion
-    "l2_fill_rsp_src.local_ccx",  # Local Traffic
-    "l2_fill_rsp_src.far_cache",  # Remote Traffic
-    # Branch Prediction
-    "branch-misses",
-    "ex_ret_brn_misp",
-    "bp_redirects.ex_redir",
-    "bp_de_redirect",
-    "bp_l2_btb_correct",
-    "bp_l1_tlb_miss_l2_tlb_hit",
-    # Speculation
-    "de_src_op_disp.all",
-    "ex_ret_ops",
-    "speculation_efficiency",  # Derived
-    # Pipeline Stalls
-    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq",  # ROB Full
-    "de_no_dispatch_per_slot.backend_stalls",
-    "ex_no_retire.load_not_complete",
-    "ex_no_retire.empty",
-    "bp_redirects.resync",
-    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall",
-]
-
-# Aliases for cleaner plot titles
+# --- METRIC DEFINITIONS ---
+# Defined in the exact order they should appear in the plots.
+# The keys generate the list of metrics to process.
 metric_titles = {
-    # General
-    "Time": "Time",
-    "Energy": "Energy",
-    "instructions": "Total Instructions",
-    "cycles": "CPU Cycles",
-    # Memory
+    # --- OLD METRICS ---
+    "time": "Time",
+    "energy": "Energy",
     "ls_any_fills_from_sys.remote_cache": "Any Remote Fills",
-    "ls_dmnd_fills_from_sys.remote_cache": "Demand Remote Fills",
-    "ls_bad_status2.stli_other": "Store-to-Load Conflicts",
-    "cache-misses": "LLC Misses",
     "ls_dmnd_fills_from_sys.all": "L1 Accesses (Demand)",
     "l1_miss_rate": "L1 Miss Rate",
     "l2_cache_req_stat.all": "L2 Requests (Total)",
     "l2_miss_rate": "L2 Miss Rate",
     "ls_dmnd_fills_from_sys.local_ccx": "L3 Accesses (Local CCX)",
-    "ls_dmnd_fills_from_sys.dram_io_all": "L3 Miss Rate",
-    # Coherence
-    "l2_request_g1.rd_blk_x": "L2 RFO (Writes)",
-    "ls_alloc_mab_count": "MAB Congestion (Cycles)",
-    "l2_fill_rsp_src.local_ccx": "Local CCX Fills (Same-CCD)",
-    "l2_fill_rsp_src.far_cache": "Remote Fills (Cross-CCD)",
-    # Branch
+    "l3_miss_rate": "L3 Miss Rate",
     "branch-misses": "Branch Misses (Total)",
     "ex_ret_brn_misp": "Retired Branch Mispredicts",
     "bp_redirects.ex_redir": "Pipeline Flush (Exec)",
     "bp_de_redirect": "Pipeline Flush (Decode)",
     "bp_l2_btb_correct": "L2 BTB Corrections",
     "bp_l1_tlb_miss_l2_tlb_hit": "L1 ITLB Miss",
-    # Speculation
+    "bp_redirects.resync": "Pipeline Resyncs",
     "de_src_op_disp.all": "Ops Dispatched",
     "ex_ret_ops": "Ops Retired",
     "speculation_efficiency": "Speculation Efficiency (Ret/Disp)",
-    # Stalls
-    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "ROB Full Stalls",
-    "de_no_dispatch_per_slot.backend_stalls": "Backend Stalls",
-    "ex_no_retire.load_not_complete": "Stall (Waiting for Load)",
-    "ex_no_retire.empty": "Stall (Pipeline Empty)",
-    "bp_redirects.resync": "Pipeline Resyncs",
     "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall": "Load Queue Stalls",
+    "ex_no_retire.empty": "Stall (Pipeline Empty)",
+    "ex_no_retire.load_not_complete": "Stall (Waiting for Load)",
+    "de_no_dispatch_per_slot.backend_stalls": "Backend Stalls",
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "ROB Full Stalls",
+    "instructions": "Total Instructions",
+    "ls_alloc_mab_count": "MAB Congestion (Cycles)",
+    "l2_request_g1.rd_blk_x": "L2 RFO (Writes)",
+    "l2_fill_rsp_src.local_ccx": "Local CCX Fills (Same-CCD)",
+    "l2_fill_rsp_src.far_cache": "Remote Fills (Cross-CCD)",
+    # --- NEW METRICS ---
+    "cycles": "CPU Cycles",
+    "ls_dmnd_fills_from_sys.remote_cache": "Demand Remote Fills",
+    "cache-misses": "LLC Misses (System)",
+    "ls_bad_status2.stli_other": "Store-to-Load Conflicts",
+    "ls_dmnd_fills_from_sys.dram_io_all": "L3 Miss Count (DRAM IO)",
+    "ex_no_retire.thread_not_selected": "Stall (SMT Contention)",
+    "de_op_queue_empty": "Frontend Starvation (Op Q Empty)",
+    "l2_request_g1.rd_blk_l": "L2 Read Requests",
+    "ls_dispatch.store_dispatch": "Total Stores Dispatched",
+    "ls_l1_d_tlb_miss.all": "L1 D-TLB Misses",
 }
 
-# Units for labeling
-metric_units = {
-    "Time": "seconds",
-    "Energy": "joules",
-    "instructions": "ops",
-    "cycles": "cycles",
-    "ls_any_fills_from_sys.remote_cache": "fills",
-    "ls_dmnd_fills_from_sys.remote_cache": "fills",
-    "ls_bad_status2.stli_other": "events",
-    "cache-misses": "misses",
-    "ls_dmnd_fills_from_sys.all": "accesses",
-    "l1_miss_rate": "%",
-    "l2_cache_req_stat.all": "reqs",
-    "l2_miss_rate": "%",
-    "ls_dmnd_fills_from_sys.local_ccx": "accesses",
-    "l3_miss_rate": "%",
-    "l2_request_g1.rd_blk_x": "reqs",
-    "ls_alloc_mab_count": "cycles",
-    "l2_fill_rsp_src.local_ccx": "fills",
-    "l2_fill_rsp_src.far_cache": "fills",
-    "branch-misses": "misses",
-    "ex_ret_brn_misp": "ops",
-    "bp_redirects.ex_redir": "events",
-    "bp_de_redirect": "events",
-    "bp_l2_btb_correct": "events",
-    "bp_l1_tlb_miss_l2_tlb_hit": "events",
-    "de_src_op_disp.all": "ops",
-    "ex_ret_ops": "ops",
-    "speculation_efficiency": "ratio",
-    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "cycles",
-    "de_no_dispatch_per_slot.backend_stalls": "cycles",
-    "ex_no_retire.load_not_complete": "cycles",
-    "ex_no_retire.empty": "cycles",
-    "bp_redirects.resync": "events",
-    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall": "cycles",
-}
+# Automatically derive the list of metrics from the dictionary keys to maintain order
+metrics = list(metric_titles.keys())
 
 # Metrics to display on Log Scale
 log_metrics = [
@@ -163,7 +88,6 @@ log_metrics = [
 mode_names = {0: "Default", 1: "Same core", 2: "Same CCD", 3: "Different CCDs"}
 
 # --- PARSING LOGIC ---
-# --- 1. DATA COLLECTION ---
 data = defaultdict(
     lambda: defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
@@ -187,10 +111,8 @@ for filepath in files:
     if len(parts) < 5:
         continue
 
-    # Robust metadata extraction
     try:
         thread = int(parts[0])
-        # Skip size (parts[1])
         mode = 0
         stress = 0
         goodbad = "good"
@@ -205,7 +127,7 @@ for filepath in files:
             if "bad" in part:
                 goodbad = "bad"
     except ValueError:
-        continue  # Skip files with unexpected naming
+        continue
 
     try:
         with open(filepath, "r") as f:
@@ -215,25 +137,21 @@ for filepath in files:
                     if not key or val is None:
                         continue
 
-                    # Clean strings
                     key = key.strip()
                     val = val.strip()
 
-                    # 1. Normalize Keys (Time -> time)
+                    # Normalize Keys
                     if key == "Time":
                         key = "time"
                     if key == "Energy":
                         key = "energy"
 
-                    # 2. Skip invalid values
                     if val == "" or val == "NaN" or "<" in val:
                         continue
 
-                    # 3. Robust Float Conversion
                     try:
                         data[thread][mode][stress][goodbad][key].append(float(val))
                     except ValueError:
-                        # Silently skip non-numeric data to prevent crashing
                         continue
 
     except Exception as e:
@@ -250,43 +168,56 @@ for t in data:
                 def calc_ratio(num_list, den_list):
                     return [n / d if d > 0 else 0 for n, d in zip(num_list, den_list)]
 
-                # L1 Miss Rate
+                # 1. L1 Miss Rate
+                # L1 Accesses = ls_dmnd_fills_from_sys.all
+                # L1 Hits = ls_dmnd_fills_from_sys.local_l2
                 if "ls_dmnd_fills_from_sys.all" in d:
-                    d["l1_accesses"] = d["ls_dmnd_fills_from_sys.all"]  # Approximate
-                    # If you have misses explicitly or hits:
+                    acc = d["ls_dmnd_fills_from_sys.all"]
                     if "ls_dmnd_fills_from_sys.local_l2" in d:
-                        # Misses = All - Hits (approx)
                         hits = d["ls_dmnd_fills_from_sys.local_l2"]
-                        misses = [a - h for a, h in zip(d["l1_accesses"], hits)]
+                        misses = [a - h for a, h in zip(acc, hits)]
                         d["l1_miss_rate"] = [
-                            m / a * 100 if a > 0 else 0
-                            for m, a in zip(misses, d["l1_accesses"])
+                            m / a * 100 if a > 0 else 0 for m, a in zip(misses, acc)
                         ]
 
-                # L2 Miss Rate
-                if "l2_cache_req_stat.all" in d:
-                    d["l2_accesses"] = d["l2_cache_req_stat.all"]
-                    if "l2_cache_req_stat.ic_dc_miss_in_l2" in d:
-                        d["l2_miss_rate"] = [
-                            m / a * 100 if a > 0 else 0
-                            for m, a in zip(
-                                d["l2_cache_req_stat.ic_dc_miss_in_l2"],
-                                d["l2_accesses"],
-                            )
-                        ]
+                # 2. L2 Miss Rate
+                # L2 Accesses = l2_cache_req_stat.all
+                # L2 Misses = l2_cache_req_stat.ic_dc_miss_in_l2
+                if (
+                    "l2_cache_req_stat.all" in d
+                    and "l2_cache_req_stat.ic_dc_miss_in_l2" in d
+                ):
+                    d["l2_miss_rate"] = [
+                        m / a * 100 if a > 0 else 0
+                        for m, a in zip(
+                            d["l2_cache_req_stat.ic_dc_miss_in_l2"],
+                            d["l2_cache_req_stat.all"],
+                        )
+                    ]
 
-                # Speculation Efficiency (Ret / Disp)
+                # 3. L3 Miss Rate (Restored Logic)
+                # L3 Accesses = ls_dmnd_fills_from_sys.local_ccx
+                # L3 Misses (DRAM IO) = ls_dmnd_fills_from_sys.dram_io_all
+                if (
+                    "ls_dmnd_fills_from_sys.local_ccx" in d
+                    and "ls_dmnd_fills_from_sys.dram_io_all" in d
+                ):
+                    d["l3_miss_rate"] = [
+                        m / a * 100 if a > 0 else 0
+                        for m, a in zip(
+                            d["ls_dmnd_fills_from_sys.dram_io_all"],
+                            d["ls_dmnd_fills_from_sys.local_ccx"],
+                        )
+                    ]
+
+                # 4. Speculation Efficiency
                 if "ex_ret_ops" in d and "de_src_op_disp.all" in d:
                     d["speculation_efficiency"] = calc_ratio(
                         d["ex_ret_ops"], d["de_src_op_disp.all"]
                     )
 
-                # Map old names to generic plot names if not present
-                if "ls_any_fills_from_sys.remote_cache" in d:
-                    d["remote_cache_fills"] = d["ls_any_fills_from_sys.remote_cache"]
 
-
-# --- PLOTTING ---
+# --- PLOTTING (Iterates over ordered 'metrics' list) ---
 def get_stats(thread, mode, stress, goodbad, metric):
     vals = data[thread][mode][stress][goodbad].get(metric, [])
     if not vals:
@@ -299,8 +230,8 @@ def get_stats(thread, mode, stress, goodbad, metric):
 for thread in sorted(data.keys()):
     modes = sorted(data[thread].keys())
 
-    # Grid size: 6 rows x 5 columns
-    fig, axes = plt.subplots(6, 5, figsize=(25, 24))
+    # Expanded Grid: 7 rows x 5 columns to accommodate 30+ metrics
+    fig, axes = plt.subplots(7, 5, figsize=(25, 28))
     axes = axes.flatten()
 
     for i, metric in enumerate(metrics):
@@ -366,6 +297,7 @@ for thread in sorted(data.keys()):
 
         ax.set_xticks(x)
         ax.set_xticklabels([mode_names.get(m, f"Mode {m}") for m in modes])
+        # Use friendly title if available, otherwise raw name
         ax.set_title(metric_titles.get(metric, metric), fontsize=10)
 
         if metric in log_metrics:
@@ -382,7 +314,7 @@ for thread in sorted(data.keys()):
     plt.savefig(f"results/plots/plot_thread_{thread}.png", dpi=300)
     plt.close()
 
-# Time vs Threads plot (unchanged logic)
+# --- TIME VS THREADS PLOT (Unchanged) ---
 all_modes = set()
 for t in data:
     all_modes.update(data[t].keys())
@@ -442,38 +374,29 @@ for target_mode in sorted(all_modes):
         capsize=5,
     )
 
-    # Add ratio labels dynamically
     for i, x_val in enumerate(valid_threads):
-        # Collect points at this x
         points = [
             (c1[i], C1_COLOR),
             (c2[i], C2_COLOR),
             (c3[i], C3_COLOR),
             (c4[i], C4_COLOR),
         ]
-        # Sort by value (time) ascending
         points.sort(key=lambda p: p[0])
-
-        # Iterate from the second point upwards
         for j in range(1, len(points)):
             curr_val, _ = points[j]
-
-            # Iterate over all points below the current one
             label_count = 0
             for k in range(j):
                 prev_val, prev_color = points[k]
-
                 if prev_val > 0:
                     ratio = curr_val / prev_val
-                    # Add annotation
                     plt.annotate(
                         f"{ratio:.1f}x",
                         (x_val, curr_val),
                         textcoords="offset points",
-                        xytext=(0, 5 + (label_count * 10)),  # Stack them upwards
+                        xytext=(0, 5 + (label_count * 10)),
                         ha="center",
                         fontsize=8,
-                        color=prev_color,  # Colored according to comparison baseline
+                        color=prev_color,
                         fontweight="bold",
                     )
                     label_count += 1

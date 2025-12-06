@@ -12,8 +12,8 @@ RUNS=$((REPEATS+1))
 CHUNK_SIZE=5  # Maximum number of counters to record at once
 
 # --- EXECUTION PARAMETERS ---
-NUM_THREADS=(1 2 3 4 5 6 7 8 9 10)
-NUM_EXECUTIONS=(100000000)
+NUM_THREADS=(1 2 3 4 5 6 7 8 9 10 11 12)
+NUM_EXECUTIONS=(1000000000)
 TARGET_GOOD="./bin/good.exe"
 TARGET_BAD="./bin/bad.exe"
 
@@ -41,9 +41,12 @@ METRICS_ROB="de_dispatch_stall_cycle_dynamic_tokens_part2.retq"
 # Coherence (Congestion, Writes, Traffic Source)
 METRICS_COHERENCE="ls_alloc_mab_count l2_request_g1.rd_blk_x l2_fill_rsp_src.local_ccx l2_fill_rsp_src.far_cache"
 
+# Advanced Debugging (SMT, Frontend Starvation, Write Ratios)
+METRICS_DEBUG="ex_no_retire.thread_not_selected de_op_queue_empty l2_request_g1.rd_blk_l ls_dispatch.store_dispatch ls_l1_d_tlb_miss.all"
+
 # --- COMBINE METRICS ---
 # The order here determines the column order in the CSV (after Time/Energy)
-METRICS_LIST="$METRICS_GENERAL $METRICS_CACHE $METRICS_L1 $METRICS_L2 $METRICS_L3 $METRICS_BRANCH $METRICS_SPECULATION $METRICS_PIPELINE $METRICS_ROB $METRICS_COHERENCE"
+METRICS_LIST="$METRICS_GENERAL $METRICS_CACHE $METRICS_L1 $METRICS_L2 $METRICS_L3 $METRICS_BRANCH $METRICS_SPECULATION $METRICS_PIPELINE $METRICS_ROB $METRICS_COHERENCE $METRICS_DEBUG"
 
 # Convert space-separated list to comma-separated for perf input (if needed) and array for chunking
 IFS=' ' read -r -a METRICS_ARRAY <<< "$METRICS_LIST"
