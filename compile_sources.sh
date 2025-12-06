@@ -15,14 +15,14 @@ SRC_BAD=./src/coherency.cpp
 DEFINE_BAD="UNALIGNED_COUNTER"
 
 # Compile the good program
-printf "Compiling $SRC_GOOD...\n"
+printf "Compiling $SRC_GOOD to $TARGET_GOOD...\n"
 if ! $CXX $CXXFLAGS -D$DEFINE_GOOD $SRC_GOOD -o $TARGET_GOOD; then
     printf "Failed to compile $SRC_GOOD.\n"
     exit 1
 fi
 
 # Compile the bad program
-printf "Compiling $SRC_BAD...\n"
+printf "Compiling $SRC_BAD to $TARGET_BAD...\n"
 if ! $CXX $CXXFLAGS -D$DEFINE_BAD $SRC_BAD -o $TARGET_BAD; then
     printf "Failed to compile $SRC_BAD.\n"
     exit 1

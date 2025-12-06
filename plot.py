@@ -10,6 +10,7 @@
 
 import os
 import glob
+import math
 import numpy as np
 import matplotlib.pyplot as plt
 import csv
@@ -24,7 +25,6 @@ C2_COLOR = "#4a90e2"  # Bad uArch
 C3_COLOR = "#CC6666"  # Bad Mem
 C4_COLOR = "#8e44ad"  # Bad Both
 
-# --- METRIC DEFINITIONS ---
 # --- METRIC DEFINITIONS ---
 # Defined in the exact order they should appear in the plots.
 # The keys generate the list of metrics to process.
@@ -70,6 +70,31 @@ metric_titles = {
     "l2_request_g1.rd_blk_l": "L2 Read Requests",
     "ls_dispatch.store_dispatch": "Total Stores Dispatched",
     "ls_l1_d_tlb_miss.all": "L1 D-TLB Misses",
+    "op_cache_hit_miss.op_cache_miss": "Op Cache Misses",
+    "ex_div_busy": "Divider Busy Cycles",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.store_queue_rsrc_stall": "Store Queue Stalls",
+    "ls_stlf": "Store-to-Load Fwd Hits",
+    "ls_dispatch.ld_dispatch": "Total Loads Dispatched",
+    "l2_request_g1.l2_hw_pf": "L2 Prefetch Requests",
+    "l2_pf_miss_l2_l3.l2_hwpf": "Useless Prefetches (Miss L2/L3)",
+    "ipc": "IPC (Instr/Cycle)",
+    "smt_contention_pct": "SMT Contention (% of Cycles)",
+    "frontend_starvation_pct": "Frontend Starvation (% of Cycles)",
+    "write_intensity_pct": "Write Intensity (% of L2 Traffic)",
+    "prefetch_waste_pct": "Prefetcher Waste Rate (% Useless)",
+    "op_cache_mpki": "Op Cache Misses per 1k Instr",
+    "divider_busy_pct": "Divider Busy (% of Cycles)",
+    "load_store_ratio": "Load-to-Store Ratio",
+    "avg_mab_occupancy": "Avg MAB Occupancy (Entries)",
+    "remote_traffic_pct": "Remote Traffic (% of L2 Fills)",
+    "branch_mpki": "Branch MPKI (Misses/1k Instr)",
+    "l2_mpki": "L2 MPKI (Misses/1k Instr)",
+    "l3_mpki": "L3 MPKI (Misses/1k Instr)",
+    "true_l1_miss_rate": "True L1 D-Cache Miss Rate (%)",
+    "memory_bound_pct": "Memory Bound Stall (% of Cycles)",
+    "stlf_rate": "STLF Rate (% of Loads)",
+    "l1_dtlb_mpki": "L1 D-TLB MPKI (Misses/1k Instr)",
+    "uop_density": "Micro-Op Density (uOps/Instr)",
 }
 
 # Automatically derive the list of metrics from the dictionary keys to maintain order
@@ -216,6 +241,153 @@ for t in data:
                         d["ex_ret_ops"], d["de_src_op_disp.all"]
                     )
 
+                # 5. IPC
+                if "instructions" in d and "cycles" in d:
+                    d["ipc"] = calc_ratio(d["instructions"], d["cycles"])
+
+                # 6. SMT Contention % (ex_no_retire.thread_not_selected / cycles)
+                if "ex_no_retire.thread_not_selected" in d and "cycles" in d:
+                    ratio = calc_ratio(
+                        d["ex_no_retire.thread_not_selected"], d["cycles"]
+                    )
+                    d["smt_contention_pct"] = [r * 100 for r in ratio]
+
+                # 7. Frontend Starvation % (de_op_queue_empty / cycles)
+                if "de_op_queue_empty" in d and "cycles" in d:
+                    ratio = calc_ratio(d["de_op_queue_empty"], d["cycles"])
+                    d["frontend_starvation_pct"] = [r * 100 for r in ratio]
+
+                # 8. Write Intensity (Writes / (Writes + Reads))
+                # Uses: l2_request_g1.rd_blk_x (Writes) and l2_request_g1.rd_blk_l (Reads)
+                if "l2_request_g1.rd_blk_x" in d and "l2_request_g1.rd_blk_l" in d:
+                    writes = d["l2_request_g1.rd_blk_x"]
+                    reads = d["l2_request_g1.rd_blk_l"]
+                    total = [w + r for w, r in zip(writes, reads)]
+                    d["write_intensity_pct"] = [
+                        (w / t * 100) if t > 0 else 0 for w, t in zip(writes, total)
+                    ]
+
+                # 9. Prefetch Waste Rate (Missed L2&L3 / Total PF Reqs)
+                if "l2_pf_miss_l2_l3.l2_hwpf" in d and "l2_request_g1.l2_hw_pf" in d:
+                    missed = d["l2_pf_miss_l2_l3.l2_hwpf"]
+                    total = d["l2_request_g1.l2_hw_pf"]
+                    d["prefetch_waste_pct"] = [
+                        (m / t * 100) if t > 0 else 0 for m, t in zip(missed, total)
+                    ]
+
+                # 10. Op Cache MPKI (Misses per 1000 Instructions)
+                if "op_cache_hit_miss.op_cache_miss" in d and "instructions" in d:
+                    misses = d["op_cache_hit_miss.op_cache_miss"]
+                    instr = d["instructions"]
+                    d["op_cache_mpki"] = [
+                        (m * 1000 / i) if i > 0 else 0 for m, i in zip(misses, instr)
+                    ]
+
+                # 11. Divider Busy %
+                if "ex_div_busy" in d and "cycles" in d:
+                    ratio = calc_ratio(d["ex_div_busy"], d["cycles"])
+                    d["divider_busy_pct"] = [r * 100 for r in ratio]
+
+                # 12. Load/Store Ratio
+                if "ls_dispatch.ld_dispatch" in d and "ls_dispatch.store_dispatch" in d:
+                    d["load_store_ratio"] = calc_ratio(
+                        d["ls_dispatch.ld_dispatch"], d["ls_dispatch.store_dispatch"]
+                    )
+
+                # 13. Average MAB Occupancy (MAB Alloc / Cycles)
+                # Note: This metric counts accumulated allocations per cycle, so dividing by cycles gives avg depth.
+                if "ls_alloc_mab_count" in d and "cycles" in d:
+                    mab = d["ls_alloc_mab_count"]
+                    cycles = d["cycles"]
+                    d["avg_mab_occupancy"] = [
+                        (m / c) if c > 0 else 0 for m, c in zip(mab, cycles)
+                    ]
+
+                # 14. Remote Traffic % (Remote Fills / (Local + Remote))
+                if (
+                    "l2_fill_rsp_src.far_cache" in d
+                    and "l2_fill_rsp_src.local_ccx" in d
+                ):
+                    remote = d["l2_fill_rsp_src.far_cache"]
+                    local = d["l2_fill_rsp_src.local_ccx"]
+                    total = [r + l for r, l in zip(remote, local)]
+                    d["remote_traffic_pct"] = [
+                        (r / t * 100) if t > 0 else 0 for r, t in zip(remote, total)
+                    ]
+
+                # 15. MPKI Metrics (Misses * 1000 / Instructions)
+                if "instructions" in d:
+                    instr = d["instructions"]
+
+                    # Branch MPKI
+                    if "branch-misses" in d:
+                        d["branch_mpki"] = [
+                            (m * 1000 / i) if i > 0 else 0
+                            for m, i in zip(d["branch-misses"], instr)
+                        ]
+
+                    # L2 MPKI
+                    if "l2_cache_req_stat.ic_dc_miss_in_l2" in d:
+                        d["l2_mpki"] = [
+                            (m * 1000 / i) if i > 0 else 0
+                            for m, i in zip(
+                                d["l2_cache_req_stat.ic_dc_miss_in_l2"], instr
+                            )
+                        ]
+
+                    # L3 MPKI
+                    if (
+                        "ls_dmnd_fills_from_sys.dram_io_all" in d
+                    ):  # Using raw miss count
+                        d["l3_mpki"] = [
+                            (m * 1000 / i) if i > 0 else 0
+                            for m, i in zip(
+                                d["ls_dmnd_fills_from_sys.dram_io_all"], instr
+                            )
+                        ]
+
+                # 16. True L1 D-Cache Miss Rate
+                # Fills (Misses) / (Loads + Stores)
+                if (
+                    "ls_dmnd_fills_from_sys.all" in d
+                    and "ls_dispatch.ld_dispatch" in d
+                    and "ls_dispatch.store_dispatch" in d
+                ):
+                    fills = d["ls_dmnd_fills_from_sys.all"]
+                    loads = d["ls_dispatch.ld_dispatch"]
+                    stores = d["ls_dispatch.store_dispatch"]
+                    accesses = [l + s for l, s in zip(loads, stores)]
+                    d["true_l1_miss_rate"] = [
+                        (f / a * 100) if a > 0 else 0 for f, a in zip(fills, accesses)
+                    ]
+
+                # 17. Memory Bound % (Stall on Load / Cycles)
+                if "ex_no_retire.load_not_complete" in d and "cycles" in d:
+                    stall = d["ex_no_retire.load_not_complete"]
+                    cycles = d["cycles"]
+                    d["memory_bound_pct"] = [
+                        (s / c * 100) if c > 0 else 0 for s, c in zip(stall, cycles)
+                    ]
+
+                # 18. STLF Rate (STLF Hits / Total Loads)
+                if "ls_stlf" in d and "ls_dispatch.ld_dispatch" in d:
+                    stlf = d["ls_stlf"]
+                    loads = d["ls_dispatch.ld_dispatch"]
+                    d["stlf_rate"] = [
+                        (s / l * 100) if l > 0 else 0 for s, l in zip(stlf, loads)
+                    ]
+
+                # 19. L1 D-TLB MPKI
+                if "ls_l1_d_tlb_miss.all" in d and "instructions" in d:
+                    d["l1_dtlb_mpki"] = [
+                        (m * 1000 / i) if i > 0 else 0
+                        for m, i in zip(d["ls_l1_d_tlb_miss.all"], d["instructions"])
+                    ]
+
+                # 20. Micro-Op Density (Retired Ops / Instructions)
+                if "ex_ret_ops" in d and "instructions" in d:
+                    d["uop_density"] = calc_ratio(d["ex_ret_ops"], d["instructions"])
+
 
 # --- PLOTTING (Iterates over ordered 'metrics' list) ---
 def get_stats(thread, mode, stress, goodbad, metric):
@@ -230,8 +402,15 @@ def get_stats(thread, mode, stress, goodbad, metric):
 for thread in sorted(data.keys()):
     modes = sorted(data[thread].keys())
 
-    # Expanded Grid: 7 rows x 5 columns to accommodate 30+ metrics
-    fig, axes = plt.subplots(7, 5, figsize=(25, 28))
+    # Dynamic Grid Calculation
+    num_plots = len(metrics)
+    cols = 5
+    rows = math.ceil(num_plots / cols)
+
+    # Dynamic Figure Height: Assign ~4 inches of vertical space per row
+    fig_height = rows * 4
+
+    fig, axes = plt.subplots(rows, cols, figsize=(25, fig_height))
     axes = axes.flatten()
 
     for i, metric in enumerate(metrics):
