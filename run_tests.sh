@@ -11,45 +11,55 @@ REPEATS=10
 RUNS=$((REPEATS+1))
 CHUNK_SIZE=5  # Maximum number of counters to record at once
 
+# --- EXECUTION PARAMETERS ---
+NUM_THREADS=(1 2 3 4 5 6 7 8 9 10)
+NUM_EXECUTIONS=(100000000)
+TARGET_GOOD="./bin/good.exe"
+TARGET_BAD="./bin/bad.exe"
+
 # --- METRIC DEFINITIONS ---
 
 # 1. Energy (Separate run due to system limitations/frequency scaling impact)
+# NOTE: Energy is run separately but merged into the final CSV.
 METRICS_ENERGY="power/energy-pkg/"
 
-# 2. Memory Hierarchy
-METRICS_CACHE="ls_any_fills_from_sys.remote_cache,ls_dmnd_fills_from_sys.remote_cache,ls_bad_status2.stli_other,cache-misses"
-METRICS_L1="ls_dmnd_fills_from_sys.all,ls_dmnd_fills_from_sys.local_l2"
-METRICS_L2="l2_cache_req_stat.all,l2_cache_req_stat.ic_dc_hit_in_l2,l2_cache_req_stat.ic_dc_miss_in_l2"
-METRICS_L3="ls_dmnd_fills_from_sys.local_ccx,ls_dmnd_fills_from_sys.dram_io_all"
+# General
+METRICS_GENERAL="instructions cycles"
 
-# 3. New Micro-Architecture Metrics (Branch, Speculation, Pipeline, ROB)
-# Fixed typo: METRICS_BANCH -> METRICS_BRANCH
-METRICS_BRANCH="branch-misses,ex_ret_brn_misp,bp_redirects.ex_redir,bp_de_redirect,bp_l2_btb_correct,bp_l1_tlb_miss_l2_tlb_hit"
-METRICS_SPECULATION="de_src_op_disp.all,ex_ret_ops,de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall"
-METRICS_PIPELINE="ex_no_retire.empty,ex_no_retire.load_not_complete,bp_redirects.resync,de_no_dispatch_per_slot.backend_stalls"
+# Memory Hierarchy
+METRICS_CACHE="ls_any_fills_from_sys.remote_cache ls_dmnd_fills_from_sys.remote_cache ls_bad_status2.stli_other cache-misses"
+METRICS_L1="ls_dmnd_fills_from_sys.all ls_dmnd_fills_from_sys.local_l2"
+METRICS_L2="l2_cache_req_stat.all l2_cache_req_stat.ic_dc_hit_in_l2 l2_cache_req_stat.ic_dc_miss_in_l2"
+METRICS_L3="ls_dmnd_fills_from_sys.local_ccx ls_dmnd_fills_from_sys.dram_io_all"
+
+# Micro-Architecture
+METRICS_BRANCH="branch-misses ex_ret_brn_misp bp_redirects.ex_redir bp_de_redirect bp_l2_btb_correct bp_l1_tlb_miss_l2_tlb_hit"
+METRICS_SPECULATION="de_src_op_disp.all ex_ret_ops de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall"
+METRICS_PIPELINE="ex_no_retire.empty ex_no_retire.load_not_complete bp_redirects.resync de_no_dispatch_per_slot.backend_stalls"
 METRICS_ROB="de_dispatch_stall_cycle_dynamic_tokens_part2.retq"
-METRICS_COHERENCE="ls_alloc_mab_count,l2_request_g1.rd_blk_x,l2_fill_rsp_src.local_ccx,l2_fill_rsp_src.far_cache"
 
-# Concatenate uArch metrics
-METRICS_UARCH="$METRICS_BRANCH,$METRICS_SPECULATION,$METRICS_PIPELINE,$METRICS_ROB,$METRICS_COHERENCE"
+# Coherence (Congestion, Writes, Traffic Source)
+METRICS_COHERENCE="ls_alloc_mab_count l2_request_g1.rd_blk_x l2_fill_rsp_src.local_ccx l2_fill_rsp_src.far_cache"
 
-# 4. BIG COMBINED METRIC STRING (Non-Energy)
-# We join all non-energy metrics to run perf only once for these.
-METRICS_ALL="$METRICS_CACHE,$METRICS_L1,$METRICS_L2,$METRICS_L3,$METRICS_UARCH"
-# --- SPLIT METRICS_ALL INTO CHUNKS ---
-IFS=',' read -r -a ALL_METRICS_ARRAY <<< "$METRICS_ALL"
+# --- COMBINE METRICS ---
+# The order here determines the column order in the CSV (after Time/Energy)
+METRICS_LIST="$METRICS_GENERAL $METRICS_CACHE $METRICS_L1 $METRICS_L2 $METRICS_L3 $METRICS_BRANCH $METRICS_SPECULATION $METRICS_PIPELINE $METRICS_ROB $METRICS_COHERENCE"
+
+# Convert space-separated list to comma-separated for perf input (if needed) and array for chunking
+IFS=' ' read -r -a METRICS_ARRAY <<< "$METRICS_LIST"
+
+# --- CHUNKING LOGIC ---
 METRIC_CHUNKS=()
 current_chunk=""
 count=0
 
-for metric in "${ALL_METRICS_ARRAY[@]}"; do
+for metric in "${METRICS_ARRAY[@]}"; do
     if [ -z "$current_chunk" ]; then
         current_chunk="$metric"
     else
         current_chunk="$current_chunk,$metric"
     fi
     ((count+=1))
-
     if [ "$count" -ge "$CHUNK_SIZE" ]; then
         METRIC_CHUNKS+=("$current_chunk")
         current_chunk=""
@@ -67,12 +77,6 @@ for i in "${!METRIC_CHUNKS[@]}"; do
     printf "  Chunk %d: %s\n" "$((i+1))" "${METRIC_CHUNKS[$i]}"
 done
 printf "\n"
-
-# --- EXECUTION PARAMETERS ---
-NUM_THREADS=(1 2 3 4 5 6 7 8 9 10)
-NUM_EXECUTIONS=(10000000)
-TARGET_GOOD="./bin/good.exe"
-TARGET_BAD="./bin/bad.exe"
 
 # Compile first
 ./compile_sources.sh || { echo "Error compiling sources."; exit 1; }
@@ -113,9 +117,7 @@ for THREADS in "${NUM_THREADS[@]}"; do
                 printf "Running: Threads=%d, Mode=%d, Stress=%d\n" "$THREADS" "$MODE" "$STRESS"
                 suffix="${THREADS}_${NUM_EXECUTIONS}_mode${MODE}_stress${STRESS}"
 
-                # --- NEW INNER LOOP: BAD vs GOOD ---
                 for TEST_TYPE in "bad" "good"; do
-                    
                     # Configure variables based on type
                     if [ "$TEST_TYPE" == "bad" ]; then
                         CURRENT_TARGET="$TARGET_BAD"
@@ -125,110 +127,67 @@ for THREADS in "${NUM_THREADS[@]}"; do
                         TIME_GREP="Time for good coherency"
                     fi
 
-                    # Define Output Files
-                    energy_file="${RESULTS_DIR}/energy_${suffix}_${TEST_TYPE}.txt"
-                    perf_cache_file="${RESULTS_DIR}/perf_cache_${suffix}_${TEST_TYPE}.txt"
-                    perf_l1_file="${RESULTS_DIR}/perf_l1_${suffix}_${TEST_TYPE}.txt"
-                    perf_l2_file="${RESULTS_DIR}/perf_l2_${suffix}_${TEST_TYPE}.txt"
-                    perf_l3_file="${RESULTS_DIR}/perf_l3_${suffix}_${TEST_TYPE}.txt"
-                    perf_uarch_file="${RESULTS_DIR}/perf_uarch_${suffix}_${TEST_TYPE}.txt"
-                    time_file="${RESULTS_DIR}/time_${suffix}_${TEST_TYPE}.txt"
+                    # Single Result File
+                    output_file="${RESULTS_DIR}/results_${suffix}_${TEST_TYPE}.csv"
 
-                    # Check if already done
-                    if [ -f "$time_file" ] && [ "$(wc -l < "$time_file")" -ge "$RUNS" ]; then
+                    if [ -f "$output_file" ] && [ "$(wc -l < "$output_file")" -ge "$((RUNS + 1))" ]; then
                          printf "  Skipping %s (Already done)\n" "$TEST_TYPE"
                          continue
                     fi
 
-                    # Initialize Headers
-                    > "$energy_file"
-                    > "$time_file"
-                    echo "ls_any_fills_from_sys.remote_cache,ls_dmnd_fills_from_sys.remote_cache,ls_bad_status2.stli_other,cache-misses" > "$perf_cache_file"
-                    echo "ls_dmnd_fills_from_sys.all,ls_dmnd_fills_from_sys.local_l2" > "$perf_l1_file"
-                    echo "l2_cache_req_stat.all,l2_cache_req_stat.ic_dc_hit_in_l2,l2_cache_req_stat.ic_dc_miss_in_l2" > "$perf_l2_file"
-                    echo "ls_dmnd_fills_from_sys.local_ccx,ls_dmnd_fills_from_sys.dram_io_all" > "$perf_l3_file"
-                    echo "branch_misses,ex_ret_brn_misp,bp_redir_ex,bp_de_redir,bp_l2_btb,bp_l1_tlb,disp_all,ret_ops,ld_q_stall,no_ret_empty,no_ret_ld,resync,backend_stall,rob_stall,instructions,mab_alloc,l2_rfo,local_fill,remote_fill" > "$perf_uarch_file"
+                    # 1. GENERATE DYNAMIC HEADER
+                    # Converts spaces in METRICS_LIST to commas for the CSV header
+                    csv_header="Time,Energy,$(echo "$METRICS_LIST" | tr ' ' ',')"
+                    echo "$csv_header" > "$output_file"
 
-                    # Execution Loop
                     for ((r=1; r<=RUNS; r++)); do
+                        # A. RUN ENERGY & TIME (Standard Output Parsing)
+                        # We use standard output for Time parsing from the app
+                        energy_out=$($PERF_PATH stat -e $METRICS_ENERGY -- $CURRENT_TARGET $THREADS $NUM_EXECUTIONS $MODE $STRESS 2>&1) || true
                         
-                        # 1. RUN ENERGY & TIME
-                        energy_output=$($PERF_PATH stat -e $METRICS_ENERGY -- $CURRENT_TARGET $THREADS $NUM_EXECUTIONS $MODE $STRESS 2>&1) || true
-                        
-                        { echo "$energy_output" | awk '/power\/energy-pkg/ {gsub(",", "", $1); print $1; exit}' || echo "NaN"; } >> "$energy_file"
-                        { echo "$energy_output" | grep "$TIME_GREP" | sed 's/.*: \([0-9.]*\) ms/\1/' || echo "NaN"; } >> "$time_file"
+                        time_val=$(echo "$energy_out" | grep "$TIME_GREP" | sed 's/.*: \([0-9.]*\) ms/\1/' || echo "NaN")
+                        energy_val=$(echo "$energy_out" | awk '/power\/energy-pkg/ {gsub(",", "", $1); print $1; exit}' || echo "NaN")
 
-                        # 2. RUN METRIC CHUNKS
-                        all_output=""
+                        # B. RUN METRICS (Chunked, CSV Output -x,)
+                        # We accumulate the raw CSV output from all chunks
+                        raw_perf_csv=""
                         for chunk in "${METRIC_CHUNKS[@]}"; do
-                             chunk_output=$($PERF_PATH stat -e $chunk -- $CURRENT_TARGET $THREADS $NUM_EXECUTIONS $MODE $STRESS 2>&1) || true
-                             all_output="${all_output}"$'\n'"${chunk_output}"
+                             # -x, forces CSV output: value,,name,...
+                             chunk_out=$($PERF_PATH stat -x, -e $chunk -- $CURRENT_TARGET $THREADS $NUM_EXECUTIONS $MODE $STRESS 2>&1) || true
+                             raw_perf_csv="${raw_perf_csv}"$'\n'"${chunk_out}"
                         done
 
-                        # 3. PARSE RESULTS
-                        # Cache
-                        { echo "$all_output" | awk '
-                            /ls_any_fills_from_sys\.remote_cache/ {gsub(",", "", $1); remote=$1}
-                            /ls_dmnd_fills_from_sys\.remote_cache/ {gsub(",", "", $1); dmnd=$1}
-                            /ls_bad_status2\.stli_other/ {gsub(",", "", $1); stli=$1}
-                            /cache-misses/ {gsub(",", "", $1); misses=$1}
-                            END {print remote "," dmnd "," stli "," misses}
-                        ' || echo "NaN,NaN,NaN,NaN"; } >> "$perf_cache_file"
-
-                        # L1
-                        { echo "$all_output" | awk '
-                            /ls_dmnd_fills_from_sys\.all/ {gsub(",", "", $1); l1_fills=$1}
-                            /ls_dmnd_fills_from_sys\.local_l2/ {gsub(",", "", $1); l1_l2_hits=$1}
-                            END {print l1_fills "," l1_l2_hits}
-                        ' || echo "NaN,NaN"; } >> "$perf_l1_file"
-
-                        # L2
-                        { echo "$all_output" | awk '
-                            /l2_cache_req_stat\.all/ {gsub(",", "", $1); l2_all=$1}
-                            /l2_cache_req_stat\.ic_dc_hit_in_l2/ {gsub(",", "", $1); l2_hits=$1}
-                            /l2_cache_req_stat\.ic_dc_miss_in_l2/ {gsub(",", "", $1); l2_miss=$1}
-                            END {print l2_all "," l2_hits "," l2_miss}
-                        ' || echo "NaN,NaN,NaN"; } >> "$perf_l2_file"
-
-                        # L3
-                        { echo "$all_output" | awk '
-                            /ls_dmnd_fills_from_sys\.local_ccx/ {gsub(",", "", $1); l3_access=$1}
-                            /ls_dmnd_fills_from_sys\.dram_io_all/ {gsub(",", "", $1); l3_miss=$1}
-                            END {print l3_access "," l3_miss}
-                        ' || echo "NaN,NaN"; } >> "$perf_l3_file"
-
-                        # uArch
-                        { echo "$all_output" | awk '
-                            /branch-misses/ {gsub(",", "", $1); br_miss=$1}
-                            /ex_ret_brn_misp/ {gsub(",", "", $1); ex_br_misp=$1}
-                            /bp_redirects\.ex_redir/ {gsub(",", "", $1); bp_redir_ex=$1}
-                            /bp_de_redirect/ {gsub(",", "", $1); bp_de_redir=$1}
-                            /bp_l2_btb_correct/ {gsub(",", "", $1); bp_l2_btb=$1}
-                            /bp_l1_tlb_miss_l2_tlb_hit/ {gsub(",", "", $1); bp_l1_tlb=$1}
-                            /de_src_op_disp\.all/ {gsub(",", "", $1); disp_all=$1}
-                            /ex_ret_ops/ {gsub(",", "", $1); ret_ops=$1}
-                            /load_queue_rsrc_stall/ {gsub(",", "", $1); ld_q_stall=$1}
-                            /ex_no_retire\.empty/ {gsub(",", "", $1); no_ret_empty=$1}
-                            /ex_no_retire\.load_not_complete/ {gsub(",", "", $1); no_ret_ld=$1}
-                            /bp_redirects\.resync/ {gsub(",", "", $1); resync=$1}
-                            /de_no_dispatch_per_slot\.backend_stalls/ {gsub(",", "", $1); backend_stall=$1}
-                            /de_dispatch_stall_cycle_dynamic_tokens_part2\.retq/ {gsub(",", "", $1); rob_stall=$1}
-                            
-                            # --- NEW PARSING ---
-                            /instructions/ {gsub(",", "", $1); instr=$1}
-                            /ls_alloc_mab_count/ {gsub(",", "", $1); mab=$1}
-                            /l2_request_g1\.rd_blk_x/ {gsub(",", "", $1); l2_rfo=$1}
-                            /l2_fill_rsp_src\.local_ccx/ {gsub(",", "", $1); local_fill=$1}
-                            /l2_fill_rsp_src\.far_cache/ {gsub(",", "", $1); remote_fill=$1}
-
-                            END {
-                                print br_miss "," ex_br_misp "," bp_redir_ex "," bp_de_redir "," bp_l2_btb "," bp_l1_tlb "," disp_all "," ret_ops "," ld_q_stall "," no_ret_empty "," no_ret_ld "," resync "," backend_stall "," rob_stall "," instr "," mab "," l2_rfo "," local_fill "," remote_fill
+                        # C. DYNAMIC PARSING (AWK)
+                        # We pass the full ordered metric list to awk. 
+                        # Awk looks up each metric in the raw_perf_csv output and prints them in order.
+                        metrics_csv=$(echo "$raw_perf_csv" | awk -F, -v cols="$METRICS_LIST" '
+                            BEGIN {
+                                split(cols, required, " ");
                             }
-                        ' || echo "NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN"; } >> "$perf_uarch_file"
-                    done # End RUNS
-                done # End TEST_TYPE (Bad/Good)
+                            {
+                                # Map Event Name ($3) to Value ($1)
+                                # Handles basic naming. If perf output differs slightly (e.g. cpu/event/), 
+                                # ensure METRICS_LIST matches perf output exactly or add logic here.
+                                if ($3 != "") {
+                                    results[$3] = $1;
+                                }
+                            }
+                            END {
+                                for (i = 1; i <= length(required); i++) {
+                                    key = required[i];
+                                    val = results[key];
+                                    if (val == "") val = "NaN";
+                                    printf "%s", val;
+                                    if (i < length(required)) printf ",";
+                                }
+                            }
+                        ')
 
-                printf "Completed: Threads %d, Mode %d, Stress %d\n\n" "$THREADS" "$MODE" "$STRESS"
+                        # Write combined row: Time,Energy,Metrics...
+                        echo "$time_val,$energy_val,$metrics_csv" >> "$output_file"
+                    done
+                done
+                printf "Completed config.\n\n"
             done
         done
     done

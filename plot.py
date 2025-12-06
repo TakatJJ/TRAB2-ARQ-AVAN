@@ -7,182 +7,162 @@
 #     "pyqt6",
 # ]
 # ///
-
 import os
 import glob
 import numpy as np
 import matplotlib.pyplot as plt
+import csv
 from collections import defaultdict
 
 # Path to the raw results folder
 results_dir = "results/raw"
 
-# --- COLOR PALETTE (4 Cases) ---
+# --- COLOR PALETTE ---
 C1_COLOR = "#21674f"  # Good All
 C2_COLOR = "#4a90e2"  # Bad uArch
 C3_COLOR = "#CC6666"  # Bad Mem
 C4_COLOR = "#8e44ad"  # Bad Both
 
 # --- METRIC DEFINITIONS ---
+# Must match headers in results_*.csv (from headers.csv) + derived metrics
 metrics = [
     # General
     "time",
     "energy",
+    "instructions",
+    "cycles",
     # Memory Hierarchy
-    "remote_cache_fills",
-    "l1_accesses",
-    "l1_miss_rate",
-    "l2_accesses",
-    "l2_miss_rate",
-    "l3_accesses",
-    "l3_miss_rate",
+    "ls_any_fills_from_sys.remote_cache",
+    "ls_dmnd_fills_from_sys.remote_cache",
+    "cache-misses",
+    "ls_bad_status2.stli_other",
+    # L1
+    "ls_dmnd_fills_from_sys.all",
+    "l1_miss_rate",  # Derived
+    # L2
+    "l2_cache_req_stat.all",
+    "l2_miss_rate",  # Derived
+    # L3
+    "ls_dmnd_fills_from_sys.local_ccx",
+    "ls_dmnd_fills_from_sys.dram_io_all",
+    # Coherence (Zig-Zag Investigation)
+    "l2_request_g1.rd_blk_x",  # Writes/RFO
+    "ls_alloc_mab_count",  # MAB Congestion
+    "l2_fill_rsp_src.local_ccx",  # Local Traffic
+    "l2_fill_rsp_src.far_cache",  # Remote Traffic
     # Branch Prediction
-    "branch_misses",
-    "ex_ret_brn_misp",  # Retired branch mispredictions
-    "bp_redir_ex",  # Execution redirects
-    "bp_de_redir",  # Decode redirects
-    "bp_l2_btb",  # L2 BTB Correct (L2 overrides L1)
-    "bp_l1_tlb",  # L1 TLB Miss / L2 TLB Hit
-    "resync",  # Pipeline Resyncs
-    # Speculation & Execution
-    "disp_all",  # Dispatched Ops
-    "ret_ops",  # Retired Ops
-    "speculation_efficiency",  # (Derived: ret_ops / disp_all)
-    # Pipeline Stalls
-    "ld_q_stall",  # Load Queue Stalls
-    "no_ret_empty",  # Empty Pipeline (Frontend Starved/Flush)
-    "no_ret_ld",  # Waiting for Load (Backend Bound)
-    "backend_stall",  # General Backend Stalls
-    "rob_stall",  # ROB Full
-    "instructions",  # Total Instructions
-    "mab_alloc",  # MAB Congestion
-    "l2_rfo",  # L2 Writes (Read For Ownership)
-    "local_fill",  # Same-CCD Traffic
-    "remote_fill",  # Cross-CCD Traffic
-]
-
-log_metrics = [
-    "branch_misses",
+    "branch-misses",
     "ex_ret_brn_misp",
-    "bp_redir_ex",
-    "rob_stall",
-    "resync",
-    "bp_de_redir",
+    "bp_redirects.ex_redir",
+    "bp_de_redirect",
+    "bp_l2_btb_correct",
+    "bp_l1_tlb_miss_l2_tlb_hit",
+    # Speculation
+    "de_src_op_disp.all",
+    "ex_ret_ops",
+    "speculation_efficiency",  # Derived
+    # Pipeline Stalls
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq",  # ROB Full
+    "de_no_dispatch_per_slot.backend_stalls",
+    "ex_no_retire.load_not_complete",
+    "ex_no_retire.empty",
+    "bp_redirects.resync",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall",
 ]
 
-# Mode names mapping
+# Aliases for cleaner plot titles
+metric_titles = {
+    # General
+    "Time": "Time",
+    "Energy": "Energy",
+    "instructions": "Total Instructions",
+    "cycles": "CPU Cycles",
+    # Memory
+    "ls_any_fills_from_sys.remote_cache": "Any Remote Fills",
+    "ls_dmnd_fills_from_sys.remote_cache": "Demand Remote Fills",
+    "ls_bad_status2.stli_other": "Store-to-Load Conflicts",
+    "cache-misses": "LLC Misses",
+    "ls_dmnd_fills_from_sys.all": "L1 Accesses (Demand)",
+    "l1_miss_rate": "L1 Miss Rate",
+    "l2_cache_req_stat.all": "L2 Requests (Total)",
+    "l2_miss_rate": "L2 Miss Rate",
+    "ls_dmnd_fills_from_sys.local_ccx": "L3 Accesses (Local CCX)",
+    "ls_dmnd_fills_from_sys.dram_io_all": "L3 Miss Rate",
+    # Coherence
+    "l2_request_g1.rd_blk_x": "L2 RFO (Writes)",
+    "ls_alloc_mab_count": "MAB Congestion (Cycles)",
+    "l2_fill_rsp_src.local_ccx": "Local CCX Fills (Same-CCD)",
+    "l2_fill_rsp_src.far_cache": "Remote Fills (Cross-CCD)",
+    # Branch
+    "branch-misses": "Branch Misses (Total)",
+    "ex_ret_brn_misp": "Retired Branch Mispredicts",
+    "bp_redirects.ex_redir": "Pipeline Flush (Exec)",
+    "bp_de_redirect": "Pipeline Flush (Decode)",
+    "bp_l2_btb_correct": "L2 BTB Corrections",
+    "bp_l1_tlb_miss_l2_tlb_hit": "L1 ITLB Miss",
+    # Speculation
+    "de_src_op_disp.all": "Ops Dispatched",
+    "ex_ret_ops": "Ops Retired",
+    "speculation_efficiency": "Speculation Efficiency (Ret/Disp)",
+    # Stalls
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "ROB Full Stalls",
+    "de_no_dispatch_per_slot.backend_stalls": "Backend Stalls",
+    "ex_no_retire.load_not_complete": "Stall (Waiting for Load)",
+    "ex_no_retire.empty": "Stall (Pipeline Empty)",
+    "bp_redirects.resync": "Pipeline Resyncs",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall": "Load Queue Stalls",
+}
+
+# Units for labeling
+metric_units = {
+    "Time": "seconds",
+    "Energy": "joules",
+    "instructions": "ops",
+    "cycles": "cycles",
+    "ls_any_fills_from_sys.remote_cache": "fills",
+    "ls_dmnd_fills_from_sys.remote_cache": "fills",
+    "ls_bad_status2.stli_other": "events",
+    "cache-misses": "misses",
+    "ls_dmnd_fills_from_sys.all": "accesses",
+    "l1_miss_rate": "%",
+    "l2_cache_req_stat.all": "reqs",
+    "l2_miss_rate": "%",
+    "ls_dmnd_fills_from_sys.local_ccx": "accesses",
+    "l3_miss_rate": "%",
+    "l2_request_g1.rd_blk_x": "reqs",
+    "ls_alloc_mab_count": "cycles",
+    "l2_fill_rsp_src.local_ccx": "fills",
+    "l2_fill_rsp_src.far_cache": "fills",
+    "branch-misses": "misses",
+    "ex_ret_brn_misp": "ops",
+    "bp_redirects.ex_redir": "events",
+    "bp_de_redirect": "events",
+    "bp_l2_btb_correct": "events",
+    "bp_l1_tlb_miss_l2_tlb_hit": "events",
+    "de_src_op_disp.all": "ops",
+    "ex_ret_ops": "ops",
+    "speculation_efficiency": "ratio",
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "cycles",
+    "de_no_dispatch_per_slot.backend_stalls": "cycles",
+    "ex_no_retire.load_not_complete": "cycles",
+    "ex_no_retire.empty": "cycles",
+    "bp_redirects.resync": "events",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall": "cycles",
+}
+
+# Metrics to display on Log Scale
+log_metrics = [
+    "branch-misses",
+    "ex_ret_brn_misp",
+    "bp_redirects.ex_redir",
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq",
+    "ls_alloc_mab_count",
+    "bp_redirects.resync",
+]
+
 mode_names = {0: "Default", 1: "Same core", 2: "Same CCD", 3: "Different CCDs"}
 
-# Units for each metric
-metric_units = {
-    "time": "seconds",
-    "energy": "joules",
-    "remote_cache_fills": "fills",
-    "l1_accesses": "accesses",
-    "l1_miss_rate": "%",
-    "l2_accesses": "accesses",
-    "l2_miss_rate": "%",
-    "l3_accesses": "accesses",
-    "l3_miss_rate": "%",
-    # uArch Units
-    "branch_misses": "misses",
-    "ex_ret_brn_misp": "ops",
-    "bp_redir_ex": "events",
-    "bp_de_redir": "events",
-    "bp_l2_btb": "events",
-    "bp_l1_tlb": "events",
-    "resync": "events",
-    "disp_all": "ops",
-    "ret_ops": "ops",
-    "speculation_efficiency": "ratio (0-1)",
-    "ld_q_stall": "cycles",
-    "no_ret_empty": "cycles",
-    "no_ret_ld": "cycles",
-    "backend_stall": "cycles",
-    "rob_stall": "cycles",
-    "instructions": "ops",
-    "mab_alloc": "cycles",
-    "l2_rfo": "reqs",
-    "local_fill": "fills",
-    "remote_fill": "fills",
-}
-
-# Metric titles
-metric_titles = {
-    "time": "Time",
-    "energy": "Energy",
-    "remote_cache_fills": "Remote/Demand Cache Fills",
-    "l1_accesses": "L1 Accesses",
-    "l1_miss_rate": "L1 Miss Rate",
-    "l2_accesses": "L2 Accesses",
-    "l2_miss_rate": "L2 Miss Rate",
-    "l3_accesses": "L3 Accesses",
-    "l3_miss_rate": "L3 Miss Rate",
-    "branch_misses": "Branch Misses (Total)",
-    "ex_ret_brn_misp": "Retired Branch Mispredicts",
-    "bp_redir_ex": "Pipeline Flush (Exec)",
-    "bp_de_redir": "Pipeline Flush (Decode)",
-    "bp_l2_btb": "L2 BTB Corrections",
-    "bp_l1_tlb": "L1 ITLB Miss",
-    "resync": "Pipeline Resyncs",
-    "disp_all": "Ops Dispatched",
-    "ret_ops": "Ops Retired",
-    "speculation_efficiency": "Speculation Efficiency\n(Ret/Disp)",
-    "ld_q_stall": "Load Queue Stalls",
-    "no_ret_empty": "No Retire (Empty/Flush)",
-    "no_ret_ld": "No Retire (Waiting for Load)",
-    "backend_stall": "Backend Stalls",
-    "rob_stall": "ROB Full Stalls",
-    "instructions": "Total Instructions",
-    "mab_alloc": "MAB Congestion",
-    "l2_rfo": "L2 Write Reqs (RFO)",
-    "local_fill": "Local CCX Fills",
-    "remote_fill": "Remote CCX Fills",
-}
-
-
-def parse_file(filepath, metric):
-    try:
-        with open(filepath, "r") as f:
-            lines = f.readlines()
-
-        if metric in ["time", "energy"]:
-            return [
-                float(line.strip())
-                for line in lines
-                if line.strip() and line.strip() != "NaN"
-            ]
-
-        data = []
-        start_idx = 0
-
-        # Robust Header Detection
-        if len(lines) > 0:
-            try:
-                first_item = lines[0].split(",")[0].strip()
-                if not first_item or first_item == "NaN":
-                    pass
-                else:
-                    float(first_item)
-            except ValueError:
-                start_idx = 1
-
-        for line in lines[start_idx:]:
-            if line.strip():
-                values = []
-                for x in line.split(","):
-                    x = x.strip()
-                    if x == "NaN" or not x:
-                        values.append(0)
-                    else:
-                        values.append(float(x))
-                data.append(values)
-        return data
-    except Exception as e:
-        print(f"Error parsing {filepath}: {e}")
-        return []
-
-
+# --- PARSING LOGIC ---
 # --- 1. DATA COLLECTION ---
 data = defaultdict(
     lambda: defaultdict(
@@ -190,132 +170,123 @@ data = defaultdict(
     )
 )
 
-files = glob.glob(os.path.join(results_dir, "*.txt"))
+files = glob.glob(os.path.join(results_dir, "*.txt")) + glob.glob(
+    os.path.join(results_dir, "*.csv")
+)
 
-for file in files:
-    filename = os.path.basename(file)
-    parts = filename.split("_")
+for filepath in files:
+    filename = os.path.basename(filepath)
+    # Expected format: results_{THREADS}_{EXECS}_mode{MODE}_stress{STRESS}_{TYPE}.csv
+    parts = (
+        filename.replace("results_", "")
+        .replace(".csv", "")
+        .replace(".txt", "")
+        .split("_")
+    )
 
-    if len(parts) < 6:
+    if len(parts) < 5:
         continue
 
-    if parts[0] == "perf":
-        if len(parts) < 2:
-            continue
-        metric_type = f"perf_{parts[1]}"
-        thread_idx = 2
-    else:
-        metric_type = parts[0]
-        thread_idx = 1
-
-    if not parts[thread_idx].isdigit():
-        continue
-
-    thread = int(parts[thread_idx])
-    size = int(parts[thread_idx + 1])
-    mode_str = parts[thread_idx + 2]
-    stress_str = parts[thread_idx + 3]
-    goodbad_file = parts[thread_idx + 4]
-
-    mode = int(mode_str[4:])
-
-    if "stress" in stress_str:
-        stress = int(stress_str[6:])
-    else:
+    # Robust metadata extraction
+    try:
+        thread = int(parts[0])
+        # Skip size (parts[1])
+        mode = 0
         stress = 0
-        goodbad_file = stress_str
+        goodbad = "good"
 
-    goodbad = goodbad_file.split(".")[0]
+        for part in parts:
+            if part.startswith("mode"):
+                mode = int(part[4:])
+            if part.startswith("stress"):
+                stress = int(part[6:])
+            if "good" in part:
+                goodbad = "good"
+            if "bad" in part:
+                goodbad = "bad"
+    except ValueError:
+        continue  # Skip files with unexpected naming
 
-    parsed = parse_file(file, metric_type)
-    target_dict = data[thread][mode][stress][goodbad]
+    try:
+        with open(filepath, "r") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                for key, val in row.items():
+                    if not key or val is None:
+                        continue
 
-    if metric_type == "perf_cache":
-        for run in parsed:
-            if len(run) >= 4:
-                target_dict["remote_cache_fills"].append(run[1])
-    elif metric_type == "perf_l1":
-        for run in parsed:
-            if len(run) >= 2:
-                target_dict["l1_fills"].append(run[0])
-                target_dict["l1_l2_hits"].append(run[1])
-    elif metric_type == "perf_l2":
-        for run in parsed:
-            if len(run) >= 3:
-                target_dict["l2_requests"].append(run[0])
-                target_dict["l2_hits"].append(run[1])
-                target_dict["l2_misses"].append(run[2])
-    elif metric_type == "perf_l3":
-        for run in parsed:
-            if len(run) >= 2:
-                target_dict["l3_accesses"].append(run[0])
-                target_dict["l3_misses"].append(run[1])
+                    # Clean strings
+                    key = key.strip()
+                    val = val.strip()
 
-    elif metric_type == "perf_uarch":
-        # Parsing extended to 18 columns
-        for run in parsed:
-            if len(run) >= 14:
-                target_dict["branch_misses"].append(run[0])
-                target_dict["ex_ret_brn_misp"].append(run[1])
-                target_dict["bp_redir_ex"].append(run[2])
-                target_dict["bp_de_redir"].append(run[3])
-                target_dict["bp_l2_btb"].append(run[4])
-                target_dict["bp_l1_tlb"].append(run[5])
-                target_dict["disp_all"].append(run[6])
-                target_dict["ret_ops"].append(run[7])
-                target_dict["ld_q_stall"].append(run[8])
-                target_dict["no_ret_empty"].append(run[9])
-                target_dict["no_ret_ld"].append(run[10])
-                target_dict["resync"].append(run[11])
-                target_dict["backend_stall"].append(run[12])
-                target_dict["rob_stall"].append(run[13])
+                    # 1. Normalize Keys (Time -> time)
+                    if key == "Time":
+                        key = "time"
+                    if key == "Energy":
+                        key = "energy"
 
-            # New Coherence Metrics (Check if they exist)
-            if len(run) >= 19:
-                target_dict["instructions"].append(run[14])
-                target_dict["mab_alloc"].append(run[15])
-                target_dict["l2_rfo"].append(run[16])
-                target_dict["local_fill"].append(run[17])
-                target_dict["remote_fill"].append(run[18])
+                    # 2. Skip invalid values
+                    if val == "" or val == "NaN" or "<" in val:
+                        continue
 
-    elif metric_type in ["time", "energy"]:
-        target_dict[metric_type].extend(parsed)
+                    # 3. Robust Float Conversion
+                    try:
+                        data[thread][mode][stress][goodbad][key].append(float(val))
+                    except ValueError:
+                        # Silently skip non-numeric data to prevent crashing
+                        continue
 
-# --- 2. CALCULATE DERIVED METRICS ---
+    except Exception as e:
+        print(f"Warning: Could not parse file {filename}: {e}")
+
+# --- DERIVED METRICS CALCULATOR ---
 for t in data:
     for m in data[t]:
         for s in data[t][m]:
             for gb in data[t][m][s]:
                 d = data[t][m][s][gb]
 
-                if "l1_fills" in d:
-                    d["l1_accesses"] = d["l1_fills"]
-                    d["l1_miss_rate"] = [
-                        ((f - h) / f * 100) if f > 0 else 0
-                        for f, h in zip(d["l1_fills"], d["l1_l2_hits"])
-                    ]
+                # Helper: Safe list division
+                def calc_ratio(num_list, den_list):
+                    return [n / d if d > 0 else 0 for n, d in zip(num_list, den_list)]
 
-                if "l2_requests" in d:
-                    d["l2_accesses"] = d["l2_requests"]
-                    d["l2_miss_rate"] = [
-                        (miss / req * 100) if req > 0 else 0
-                        for req, miss in zip(d["l2_requests"], d["l2_misses"])
-                    ]
+                # L1 Miss Rate
+                if "ls_dmnd_fills_from_sys.all" in d:
+                    d["l1_accesses"] = d["ls_dmnd_fills_from_sys.all"]  # Approximate
+                    # If you have misses explicitly or hits:
+                    if "ls_dmnd_fills_from_sys.local_l2" in d:
+                        # Misses = All - Hits (approx)
+                        hits = d["ls_dmnd_fills_from_sys.local_l2"]
+                        misses = [a - h for a, h in zip(d["l1_accesses"], hits)]
+                        d["l1_miss_rate"] = [
+                            m / a * 100 if a > 0 else 0
+                            for m, a in zip(misses, d["l1_accesses"])
+                        ]
 
-                if "l3_accesses" in d:
-                    d["l3_miss_rate"] = [
-                        (miss / acc * 100) if acc > 0 else 0
-                        for acc, miss in zip(d["l3_accesses"], d["l3_misses"])
-                    ]
+                # L2 Miss Rate
+                if "l2_cache_req_stat.all" in d:
+                    d["l2_accesses"] = d["l2_cache_req_stat.all"]
+                    if "l2_cache_req_stat.ic_dc_miss_in_l2" in d:
+                        d["l2_miss_rate"] = [
+                            m / a * 100 if a > 0 else 0
+                            for m, a in zip(
+                                d["l2_cache_req_stat.ic_dc_miss_in_l2"],
+                                d["l2_accesses"],
+                            )
+                        ]
 
-                if "ret_ops" in d and "disp_all" in d:
-                    d["speculation_efficiency"] = [
-                        (ret / disp) if disp > 0 else 0
-                        for ret, disp in zip(d["ret_ops"], d["disp_all"])
-                    ]
+                # Speculation Efficiency (Ret / Disp)
+                if "ex_ret_ops" in d and "de_src_op_disp.all" in d:
+                    d["speculation_efficiency"] = calc_ratio(
+                        d["ex_ret_ops"], d["de_src_op_disp.all"]
+                    )
+
+                # Map old names to generic plot names if not present
+                if "ls_any_fills_from_sys.remote_cache" in d:
+                    d["remote_cache_fills"] = d["ls_any_fills_from_sys.remote_cache"]
 
 
-# --- 3. HELPER STATS ---
+# --- PLOTTING ---
 def get_stats(thread, mode, stress, goodbad, metric):
     vals = data[thread][mode][stress][goodbad].get(metric, [])
     if not vals:
@@ -325,11 +296,10 @@ def get_stats(thread, mode, stress, goodbad, metric):
     ) > 1 else 0
 
 
-# --- 4. PLOTTING: METRIC vs MODE ---
 for thread in sorted(data.keys()):
     modes = sorted(data[thread].keys())
 
-    # Expanded to 6 rows to fit 28 metrics
+    # Grid size: 6 rows x 5 columns
     fig, axes = plt.subplots(6, 5, figsize=(25, 24))
     axes = axes.flatten()
 
@@ -338,106 +308,93 @@ for thread in sorted(data.keys()):
             break
         ax = axes[i]
 
-        case1_means, case1_errs = [], []
-        case2_means, case2_errs = [], []
-        case3_means, case3_errs = [], []
-        case4_means, case4_errs = [], []
+        c1m, c1e, c2m, c2e, c3m, c3e, c4m, c4e = [], [], [], [], [], [], [], []
 
         for mode in modes:
             m1, e1 = get_stats(thread, mode, 0, "good", metric)
+            c1m.append(m1)
+            c1e.append(e1)
             m2, e2 = get_stats(thread, mode, 1, "good", metric)
+            c2m.append(m2)
+            c2e.append(e2)
             m3, e3 = get_stats(thread, mode, 0, "bad", metric)
+            c3m.append(m3)
+            c3e.append(e3)
             m4, e4 = get_stats(thread, mode, 1, "bad", metric)
-
-            case1_means.append(m1)
-            case1_errs.append(e1)
-            case2_means.append(m2)
-            case2_errs.append(e2)
-            case3_means.append(m3)
-            case3_errs.append(e3)
-            case4_means.append(m4)
-            case4_errs.append(e4)
+            c4m.append(m4)
+            c4e.append(e4)
 
         x = np.arange(len(modes))
         width = 0.2
 
         ax.bar(
             x - 1.5 * width,
-            case1_means,
+            c1m,
             width,
             label="Good All",
             color=C1_COLOR,
-            yerr=case1_errs,
+            yerr=c1e,
             capsize=3,
         )
         ax.bar(
             x - 0.5 * width,
-            case2_means,
+            c2m,
             width,
             label="Bad uArch",
             color=C2_COLOR,
-            yerr=case2_errs,
+            yerr=c2e,
             capsize=3,
         )
         ax.bar(
             x + 0.5 * width,
-            case3_means,
+            c3m,
             width,
             label="Bad Mem",
             color=C3_COLOR,
-            yerr=case3_errs,
+            yerr=c3e,
             capsize=3,
         )
         ax.bar(
             x + 1.5 * width,
-            case4_means,
+            c4m,
             width,
             label="Bad Both",
             color=C4_COLOR,
-            yerr=case4_errs,
+            yerr=c4e,
             capsize=3,
         )
 
         ax.set_xticks(x)
         ax.set_xticklabels([mode_names.get(m, f"Mode {m}") for m in modes])
         ax.set_title(metric_titles.get(metric, metric), fontsize=10)
-        ax.tick_params(axis="x", labelsize=8)
-        ax.tick_params(axis="y", labelsize=8)
 
-        if i == 0:
-            ax.legend(loc="upper left", fontsize="x-small")
         if metric in log_metrics:
             ax.set_yscale("log")
 
+        if i == 0:
+            ax.legend(loc="upper left", fontsize="x-small")
         ax.grid(True, alpha=0.3)
 
     for j in range(len(metrics), len(axes)):
         axes[j].axis("off")
-
     plt.suptitle(f"Results for {thread} Thread(s)", fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
     plt.savefig(f"results/plots/plot_thread_{thread}.png", dpi=300)
     plt.close()
 
-# --- 5. PLOTTING: TIME vs THREADS ---
+# Time vs Threads plot (unchanged logic)
 all_modes = set()
 for t in data:
     all_modes.update(data[t].keys())
-
 for target_mode in sorted(all_modes):
     if target_mode == 1:
         continue
-
     threads = sorted(data.keys())
-    c1, c2, c3, c4 = [], [], [], []
-    e1, e2, e3, e4 = [], [], [], []
-    valid_threads = []
-
+    c1, e1, c2, e2, c3, e3, c4, e4, valid_threads = [], [], [], [], [], [], [], [], []
     for t in threads:
         if target_mode not in data[t]:
             continue
         valid_threads.append(t)
-
         m, e = get_stats(t, target_mode, 0, "good", "time")
         c1.append(m)
         e1.append(e)
@@ -453,7 +410,6 @@ for target_mode in sorted(all_modes):
 
     if not valid_threads:
         continue
-
     plt.figure(figsize=(10, 6))
     plt.errorbar(
         valid_threads,
@@ -531,4 +487,4 @@ for target_mode in sorted(all_modes):
     plt.savefig(f"results/plots/time_vs_threads_mode{target_mode}.png", dpi=300)
     plt.close()
 
-print("Plots generated successfully with Extended uArch Analysis!")
+print("Plots generated!")
