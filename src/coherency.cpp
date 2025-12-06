@@ -72,23 +72,32 @@ void worker_func(int id, volatile long long& counter, long long iterations, bool
 
     // Critical Loop
     for (long long i = 0; i < iterations; ++i) {
+        // 1. Always pay the cost of the random number calculation.
+        // This equalizes the instruction count overhead (multiplication/add) 
+        // between the two modes.
+        unsigned int rand_val = fast_rand(seed);
+
         if (stress_uarch) {
-            // Case 2: Bad uArch (Random Branching)
-            // Memory is fast (L1), but Branch Predictor fails ~50% of the time
-            // & Case 4: Bad Memory & Bad uArch
-            // The branch depends on 'counter' (which is False Shared/Slow).
-            // The CPU speculates, but can't know if it's right until 'counter' arrives.
-            // When it arrives, we force a misprediction (randomness).
-            // Result: Pipeline stalls waiting for memory + Wasted speculative work.
-            if (fast_rand(seed) & 1) {
+            // Case 2 & 4: Bad uArch (Random Branching)
+            // Uses the random value to determine the path. 
+            // The CPU cannot predict this, causing frequent pipeline flushes.
+            if (rand_val & 1) {
                 counter++;
             } else {
                 counter++;
             }
         } else {
-            // Case 1: Good Everything (Predictable)
-            // & Case 3: Bad Memory Only (Predictable Branch)
-            counter++;
+            // Case 1 & 3: Good uArch (Predictable Branching)
+            // We introduce a branch here to match the instruction structure 
+            // of the 'Bad' case (test + jump).
+            // However, we use 'i & 1' (alternating 0, 1, 0, 1...) which is 
+            // trivial for the Branch Predictor to learn.
+            // Result: Similar instruction count, but near-zero mispredictions.
+            if (i & 1) {
+                counter++;
+            } else {
+                counter++;
+            }
         }
     }
 }
