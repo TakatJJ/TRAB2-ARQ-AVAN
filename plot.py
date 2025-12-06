@@ -110,6 +110,79 @@ log_metrics = [
     "bp_redirects.resync",
 ]
 
+# --- Y-AXIS LABEL MAPPING ---
+metric_ylabels = {
+    # Time & Energy
+    "time": "Seconds (s)",
+    "energy": "Energy (J)",
+    # Rates & Percentages
+    "l1_miss_rate": "Miss Rate (%)",
+    "l2_miss_rate": "Miss Rate (%)",
+    "l3_miss_rate": "Miss Rate (%)",
+    "true_l1_miss_rate": "Miss Rate (%)",
+    "smt_contention_pct": "Percentage (%)",
+    "frontend_starvation_pct": "Percentage (%)",
+    "write_intensity_pct": "Percentage (%)",
+    "prefetch_waste_pct": "Percentage (%)",
+    "divider_busy_pct": "Percentage (%)",
+    "remote_traffic_pct": "Percentage (%)",
+    "memory_bound_pct": "Percentage (%)",
+    "stlf_rate": "Rate (%)",
+    # Ratios & Densities
+    "ipc": "IPC",
+    "speculation_efficiency": "Ratio (Ret/Disp)",
+    "load_store_ratio": "Ratio (Ld/St)",
+    "uop_density": "uOps / Instr",
+    # MPKI
+    "branch_mpki": "MPKI",
+    "l2_mpki": "MPKI",
+    "l3_mpki": "MPKI",
+    "l1_dtlb_mpki": "MPKI",
+    "op_cache_mpki": "MPKI",
+    # Cycles / Latency / Occupancy
+    "cycles": "Cycles",
+    "ls_alloc_mab_count": "Accumulated Cycles",  # Context from title: Congestion (Cycles)
+    "avg_mab_occupancy": "Entries",
+    "ex_div_busy": "Cycles",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.load_queue_rsrc_stall": "Stall Cycles",
+    "ex_no_retire.empty": "Stall Cycles",
+    "ex_no_retire.load_not_complete": "Stall Cycles",
+    "de_no_dispatch_per_slot.backend_stalls": "Stall Cycles",
+    "de_dispatch_stall_cycle_dynamic_tokens_part2.retq": "Stall Cycles",
+    "ex_no_retire.thread_not_selected": "Stall Cycles",
+    "de_dispatch_stall_cycle_dynamic_tokens_part1.store_queue_rsrc_stall": "Stall Cycles",
+    # Raw Counts (Default fallbacks for explicit keys)
+    "instructions": "Count",
+    "ls_any_fills_from_sys.remote_cache": "Count",
+    "ls_dmnd_fills_from_sys.all": "Count",
+    "l2_cache_req_stat.all": "Count",
+    "ls_dmnd_fills_from_sys.local_ccx": "Count",
+    "branch-misses": "Count",
+    "ex_ret_brn_misp": "Count",
+    "bp_redirects.ex_redir": "Count",
+    "bp_de_redirect": "Count",
+    "bp_l2_btb_correct": "Count",
+    "bp_l1_tlb_miss_l2_tlb_hit": "Count",
+    "bp_redirects.resync": "Count",
+    "de_src_op_disp.all": "Count",
+    "ex_ret_ops": "Count",
+    "l2_request_g1.rd_blk_x": "Count",
+    "l2_fill_rsp_src.local_ccx": "Count",
+    "l2_fill_rsp_src.far_cache": "Count",
+    "cache-misses": "Count",
+    "ls_bad_status2.stli_other": "Count",
+    "ls_dmnd_fills_from_sys.dram_io_all": "Count",
+    "de_op_queue_empty": "Count",
+    "l2_request_g1.rd_blk_l": "Count",
+    "ls_dispatch.store_dispatch": "Count",
+    "ls_l1_d_tlb_miss.all": "Count",
+    "op_cache_hit_miss.op_cache_miss": "Count",
+    "ls_stlf": "Count",
+    "ls_dispatch.ld_dispatch": "Count",
+    "l2_request_g1.l2_hw_pf": "Count",
+    "l2_pf_miss_l2_l3.l2_hwpf": "Count",
+}
+
 mode_names = {0: "Default", 1: "Same core", 2: "Same CCD", 3: "Different CCDs"}
 
 # --- PARSING LOGIC ---
@@ -402,94 +475,127 @@ def get_stats(thread, mode, stress, goodbad, metric):
 for thread in sorted(data.keys()):
     modes = sorted(data[thread].keys())
 
-    # Dynamic Grid Calculation
+    # Create folder for individual PDFs
+    thread_pdf_dir = os.path.join("results", "plots", f"plots_thread_{thread}")
+    os.makedirs(thread_pdf_dir, exist_ok=True)
+
+    # Dynamic Grid Calculation for the BIG PNG
     num_plots = len(metrics)
     cols = 5
     rows = math.ceil(num_plots / cols)
-
-    # Dynamic Figure Height: Assign ~4 inches of vertical space per row
     fig_height = rows * 4
-
     fig, axes = plt.subplots(rows, cols, figsize=(25, fig_height))
     axes = axes.flatten()
 
     for i, metric in enumerate(metrics):
-        if i >= len(axes):
-            break
-        ax = axes[i]
-
+        # 1. PREPARE DATA
         c1m, c1e, c2m, c2e, c3m, c3e, c4m, c4e = [], [], [], [], [], [], [], []
-
         for mode in modes:
-            m1, e1 = get_stats(thread, mode, 0, "good", metric)
-            c1m.append(m1)
-            c1e.append(e1)
-            m2, e2 = get_stats(thread, mode, 1, "good", metric)
-            c2m.append(m2)
-            c2e.append(e2)
-            m3, e3 = get_stats(thread, mode, 0, "bad", metric)
-            c3m.append(m3)
-            c3e.append(e3)
-            m4, e4 = get_stats(thread, mode, 1, "bad", metric)
-            c4m.append(m4)
-            c4e.append(e4)
+            m, e = get_stats(thread, mode, 0, "good", metric)
+            c1m.append(m)
+            c1e.append(e)
+            m, e = get_stats(thread, mode, 1, "good", metric)
+            c2m.append(m)
+            c2e.append(e)
+            m, e = get_stats(thread, mode, 0, "bad", metric)
+            c3m.append(m)
+            c3e.append(e)
+            m, e = get_stats(thread, mode, 1, "bad", metric)
+            c4m.append(m)
+            c4e.append(e)
 
-        x = np.arange(len(modes))
-        width = 0.2
+        # 2. DEFINE PLOTTING LOGIC (Closure to reuse for Grid and PDF)
+        def draw_bars(ax, show_legend=False, custom_title=None):
+            x = np.arange(len(modes))
+            width = 0.2
 
-        ax.bar(
-            x - 1.5 * width,
-            c1m,
-            width,
-            label="Good All",
-            color=C1_COLOR,
-            yerr=c1e,
-            capsize=3,
-        )
-        ax.bar(
-            x - 0.5 * width,
-            c2m,
-            width,
-            label="Bad uArch",
-            color=C2_COLOR,
-            yerr=c2e,
-            capsize=3,
-        )
-        ax.bar(
-            x + 0.5 * width,
-            c3m,
-            width,
-            label="Bad Mem",
-            color=C3_COLOR,
-            yerr=c3e,
-            capsize=3,
-        )
-        ax.bar(
-            x + 1.5 * width,
-            c4m,
-            width,
-            label="Bad Both",
-            color=C4_COLOR,
-            yerr=c4e,
-            capsize=3,
-        )
+            ax.bar(
+                x - 1.5 * width,
+                c1m,
+                width,
+                label="Good All",
+                color=C1_COLOR,
+                yerr=c1e,
+                capsize=3,
+            )
+            ax.bar(
+                x - 0.5 * width,
+                c2m,
+                width,
+                label="Bad uArch",
+                color=C2_COLOR,
+                yerr=c2e,
+                capsize=3,
+            )
+            ax.bar(
+                x + 0.5 * width,
+                c3m,
+                width,
+                label="Bad Mem",
+                color=C3_COLOR,
+                yerr=c3e,
+                capsize=3,
+            )
+            ax.bar(
+                x + 1.5 * width,
+                c4m,
+                width,
+                label="Bad Both",
+                color=C4_COLOR,
+                yerr=c4e,
+                capsize=3,
+            )
 
-        ax.set_xticks(x)
-        ax.set_xticklabels([mode_names.get(m, f"Mode {m}") for m in modes])
-        # Use friendly title if available, otherwise raw name
-        ax.set_title(metric_titles.get(metric, metric), fontsize=10)
+            ax.set_xticks(x)
+            ax.set_xticklabels([mode_names.get(m, f"Mode {m}") for m in modes])
 
-        if metric in log_metrics:
-            ax.set_yscale("log")
+            # TITLE & LABELS
+            # TITLE LOGIC: Use custom title if provided, else default metric title
+            if custom_title:
+                ax.set_title(custom_title, fontsize=10)
+            else:
+                title = metric_titles.get(metric, metric)
+                ax.set_title(title, fontsize=10)
 
-        if i == 0:
-            ax.legend(loc="upper left", fontsize="x-small")
-        ax.grid(True, alpha=0.3)
+            # Y-LABEL LOOKUP
+            ylabel = metric_ylabels.get(metric, "Count")
+            ax.set_ylabel(ylabel, fontsize=9)
 
+            if metric in log_metrics:
+                ax.set_yscale("log")
+
+            if show_legend:
+                ax.legend(loc="upper left", fontsize="x-small")
+            ax.grid(True, alpha=0.3)
+
+        # 3. PLOT ON MAIN GRID (PNG)
+        if i < len(axes):
+            # Only show legend on the very first plot of the grid
+            draw_bars(axes[i], show_legend=(i == 0))
+
+        # 4. PLOT INDIVIDUAL PDF
+        # We create a separate figure for just this metric
+        fig_single, ax_single = plt.subplots(figsize=(6, 5))
+
+        base_title = metric_titles.get(metric, metric)
+        pdf_title = f"{base_title} ({thread} Threads)"
+        # Always show legend on individual plots, Generate title with Thread Count
+        draw_bars(ax_single, show_legend=True, custom_title=pdf_title)
+        plt.tight_layout()
+
+        # Save PDF
+        safe_metric_name = metric.replace("/", "_")  # Sanitize filename just in case
+        pdf_path = os.path.join(thread_pdf_dir, f"{safe_metric_name}.pdf")
+        fig_single.savefig(pdf_path)
+        plt.close(fig_single)
+
+    # 5. FINALIZE MAIN GRID PNG
     for j in range(len(metrics), len(axes)):
         axes[j].axis("off")
     plt.suptitle(f"Results for {thread} Thread(s)", fontsize=16)
     plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    # Save the Grid PNG
     plt.savefig(f"results/plots/plot_thread_{thread}.png", dpi=300)
     plt.close()
 
@@ -586,7 +692,9 @@ for target_mode in sorted(all_modes):
     plt.legend()
     plt.grid(True, alpha=0.3)
     plt.xticks(valid_threads)
-    plt.savefig(f"results/plots/time_vs_threads_mode{target_mode}.png", dpi=300)
+    filename = f"results/plots/time_vs_threads_mode{target_mode}"
+    plt.savefig(f"{filename}.png", dpi=300)
+    plt.savefig(f"{filename}.pdf")
     plt.close()
 
 print("Plots generated!")
