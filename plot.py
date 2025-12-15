@@ -136,17 +136,17 @@ log_metrics = [
 # Value can be:
 #   - Single number (e.g., 100): Sets TOP limit. Bottom defaults to 0 (linear) or auto (log).
 #   - Tuple (e.g., (1e3, 1e7)): Sets (BOTTOM, TOP) limits.
+#   - Dictionary {thread_count: value_or_tuple}: Thread-specific limits.
 METRIC_YMAX = {
     "l1_miss_rate": 100,
     "l2_miss_rate": 100,
     "l3_miss_rate": 100,
     "tempo": 4e3,
-    "ls_any_fills_from_sys.remote_cache": 18e6,
+    "ls_any_fills_from_sys.remote_cache": {3: 150e6, 6: 18e6, 7: 18e6},
     "ex_no_retire.thread_not_selected": (1e5, 1e9),
-    # "l2_cache_req_stat.all": (1e4, 2e8),
-    # "l2_request_g1.rd_blk_x": (1e4, 2e8),
-    # "ls_any_fills_from_sys.remote_cache": 150e6,
-    # "ls_dmnd_fills_from_sys.local_ccx": 150e6,
+    "l2_cache_req_stat.all": {3: (1e4, 2e8)},
+    "l2_request_g1.rd_blk_x": {3: (1e4, 2e8)},
+    "ls_dmnd_fills_from_sys.local_ccx": 150e6,
 }
 
 metric_ylabels = {
@@ -497,15 +497,26 @@ def generate_thread_plots(thread, thread_data, selected_indices):
             
             # --- APPLY Y-LIMITS ---
             if metric in METRIC_YMAX:
-                limit = METRIC_YMAX[metric]
-                if isinstance(limit, (tuple, list)):
-                    ax_target.set_ylim(bottom=limit[0], top=limit[1])
+                raw_config = METRIC_YMAX[metric]
+                limit = None
+                
+                # Check for thread-specific config (dict)
+                if isinstance(raw_config, dict):
+                    if thread in raw_config:
+                        limit = raw_config[thread]
                 else:
-                    # For log scale, bottom cannot be 0.
-                    if metric in log_metrics:
-                        ax_target.set_ylim(top=limit)
+                    # Global config
+                    limit = raw_config
+                
+                if limit is not None:
+                    if isinstance(limit, (tuple, list)):
+                        ax_target.set_ylim(bottom=limit[0], top=limit[1])
                     else:
-                        ax_target.set_ylim(bottom=0, top=limit)
+                        # For log scale, bottom cannot be 0.
+                        if metric in log_metrics:
+                            ax_target.set_ylim(top=limit)
+                        else:
+                            ax_target.set_ylim(bottom=0, top=limit)
 
             ax_target.grid(True, alpha=0.3)
 
